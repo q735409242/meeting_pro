@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    package="com.yuliao">
+
+    <!-- ===== 权限声明 ===== -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+<!--    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>-->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
+    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" tools:ignore="ProtectedPermissions"/>
+    <!-- 申请在其他应用上层绘制悬浮窗权限 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+
+    <!-- ===== Package Visibility（仅在需要 PROCESS_TEXT 插件时才加） ===== -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT"/>
+            <data android:mimeType="text/plain"/>
+        </intent>
+    </queries>
+
+    <!-- ===== Application 节点 ===== -->
+    <application
+        android:label="云助通"
+        android:icon="@mipmap/ic_launcher"
+        android:requestLegacyExternalStorage="true">
+<!--        <activity-->
+<!--            android:name=".ScreenCaptureRequestActivity"-->
+<!--            android:exported="false"-->
+<!--            android:theme="@android:style/Theme.Translucent.NoTitleBar.Fullscreen">-->
+<!--            <intent-filter>-->
+<!--                <action android:name="com.yuliao.action.REQUEST_SCREEN_CAPTURE"/>-->
+<!--                <category android:name="android.intent.category.DEFAULT"/>-->
+<!--            </intent-filter>-->
+<!--        </activity>-->
+        <!-- 主 Activity：同样写在 <application> 里 -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+
+            <!-- Flutter NormalTheme：用于启动时的背景 -->
+            <meta-data
+                android:name="io.flutter.embedding.android.NormalTheme"
+                android:resource="@style/NormalTheme"/>
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+
+        <!-- 可选的无障碍服务 -->
+        <service
+            android:name=".MyAccessibilityService"
+            android:enabled="true"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- Flutter Overlay Window 插件的服务声明 -->
+        <service
+            android:name="flutter.overlay.window.flutter_overlay_window.OverlayService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <!-- 用户可在“特殊用途”提示中看到这段描述 -->
+            <!-- 一定要在这里声明 entrypoint -->
+            <meta-data
+                android:name="flutter_overlay_window_entrypoint"
+                android:value="overlayMain"/>
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="悬浮窗服务"/>
+        </service>
+
+        <!-- 你自己的前台服务（如果有） -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:exported="false"
+            android:permission="android.permission.FOREGROUND_SERVICE"
+            android:foregroundServiceType="mediaProjection|microphone" />
+
+
+        <!-- Flutter V2 嵌入标志：不可删 -->
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2"/>
+    </application>
+</manifest>

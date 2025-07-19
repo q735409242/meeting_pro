@@ -1,0 +1,2 @@
+/Users/rover/StudioProjects/rtc_bytepuls/android/app/.cxx/Debug/f663j3v2/arm64-v8a/CMakeFiles/edit_cache.dir
+/Users/rover/StudioProjects/rtc_bytepuls/android/app/.cxx/Debug/f663j3v2/arm64-v8a/CMakeFiles/rebuild_cache.dir

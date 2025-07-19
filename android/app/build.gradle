@@ -1,0 +1,64 @@
+plugins {
+    id "com.android.application"
+    id "kotlin-android"
+    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
+    id "dev.flutter.flutter-gradle-plugin"
+}
+
+android {
+    namespace = "com.yuliao"
+    compileSdk = flutter.compileSdkVersion
+    ndkVersion = flutter.ndkVersion
+
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_1_8
+    }
+
+    defaultConfig {
+        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
+        applicationId = "com.yuliao"
+        // You can update the following values to match your application needs.
+        // For more information, see: https://flutter.dev/to/review-gradle-config.
+        minSdk = 23
+        targetSdk = 33
+        versionCode = flutter.versionCode
+        versionName = "1.0"   //APP版本号
+        ndk {
+            abiFilters 'arm64-v8a'  // ✅ 只打包 arm64 架构
+        }
+
+    }
+
+    buildTypes {
+        release {
+            // TODO: Add your own signing config for the release build.
+            // Signing with the debug keys for now, so `flutter run --release` works.
+            signingConfig = signingConfigs.debug
+        }
+    }
+    packagingOptions {
+        exclude 'lib/arm64-v8a/libagora_spatial_audio_extension.so'
+        exclude 'lib/arm64-v8a/libagora_lip_sync_extension.so'
+        exclude 'lib/arm64-v8a/libagora_clear_vision_extension.so'
+        exclude 'lib/arm64-v8a/libagora_face_capture_extension.so'
+        exclude 'lib/arm64-v8a/libagora_segmentation_extension.so'
+        exclude 'lib/arm64-v8a/libagora_audio_beauty_extension.so'
+        exclude 'lib/arm64-v8a/libagora_content_inspect_extension.so'
+        exclude 'lib/arm64-v8a/libagora_face_detection_extension.so'
+        exclude 'lib/arm64-v8a/libagora_video_quality_analyzer_extension.so'
+        exclude 'lib/arm64-v8a/libagora_ai_echo_cancellation_extension.so'
+        exclude 'lib/arm64-v8a/libagora_ai_echo_cancellation_ll_extension.so'
+        exclude 'lib/arm64-v8a/libagora_ai_noise_suppression_extension.so'
+        exclude 'lib/arm64-v8a/libagora_ai_noise_suppression_ll_extension.so'
+    }
+}
+
+flutter {
+    source = "../.."
+}
