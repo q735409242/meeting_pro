@@ -152,6 +152,10 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
 
   Timer? _nodeTreeTimer;
 
+  // 保存RTCVideoView的分辨率信息，用于节点树显示
+  double _savedRemoteScreenWidth = 0.0;
+  double _savedRemoteScreenHeight = 0.0;
+
   @override
   void initState() {
     WidgetsBinding.instance.addObserver(this);
@@ -429,7 +433,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
   }
 
   void _onTouch(Offset globalPos, String type) {
-    // 只有主控端发送坐标
+    // 只有主控端发送坐标，且在开启远程控制时响应
     if (!widget.isCaller || !_remoteOn) return;
     // 计算相对于视频区域的被控端坐标
     final position = getPosition(globalPos);
@@ -457,17 +461,28 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
 
   /// 将全局点击坐标转换为远端视频真实像素坐标（考虑 contain 模式 letterbox）
   Offset? getPosition(Offset clientPosition) {
+    // 使用保存的分辨率或当前分辨率
+    final effectiveWidth = _savedRemoteScreenWidth > 0 ? _savedRemoteScreenWidth : _remoteScreenWidth;
+    final effectiveHeight = _savedRemoteScreenHeight > 0 ? _savedRemoteScreenHeight : _remoteScreenHeight;
+    
     // 只有在已知远端分辨率时才计算
-    if (_remoteScreenWidth == 0 || _remoteScreenHeight == 0) return null;
+    if (effectiveWidth == 0 || effectiveHeight == 0) return null;
+    
+    // 尝试获取视频容器
     final box = _videoKey.currentContext?.findRenderObject() as RenderBox?;
-    if (box == null) return null;
+    if (box == null) {
+      // 如果视频容器不存在，尝试使用整个屏幕区域
+      print('⚠️ 视频容器不存在，使用屏幕区域进行坐标转换');
+      return _getPositionFromScreen(clientPosition, effectiveWidth, effectiveHeight);
+    }
+    
     // 本地容器位置与尺寸
     final topLeft = box.localToGlobal(Offset.zero);
     final viewW = box.size.width;
     final viewH = box.size.height;
     // 远端真实分辨率
-    final remoteW = _remoteScreenWidth;
-    final remoteH = _remoteScreenHeight;
+    final remoteW = effectiveWidth;
+    final remoteH = effectiveHeight;
     // contain 模式下视频展示尺寸与偏移
     final scale = min(viewW / remoteW, viewH / remoteH);
     final dispW = remoteW * scale;
@@ -483,6 +498,34 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     // 映射到远端真实像素
     final mappedX = (localX / dispW) * remoteW;
     final mappedY = (localY / dispH) * remoteH;
+    return Offset(mappedX, mappedY);
+  }
+
+  /// 当视频容器不存在时，使用屏幕区域进行坐标转换
+  Offset? _getPositionFromScreen(Offset clientPosition, double remoteWidth, double remoteHeight) {
+    if (!mounted) return null;
+    
+    final mq = MediaQuery.of(context);
+    final screenWidth = mq.size.width;
+    final screenHeight = mq.size.height;
+    
+    // 计算屏幕中心区域（假设视频显示在屏幕中央）
+    final centerX = screenWidth / 2;
+    final centerY = screenHeight / 2;
+    
+    // 计算点击相对于屏幕中心的偏移
+    final relativeX = clientPosition.dx - centerX;
+    final relativeY = clientPosition.dy - centerY;
+    
+    // 映射到远端分辨率
+    final mappedX = (relativeX / screenWidth) * remoteWidth + (remoteWidth / 2);
+    final mappedY = (relativeY / screenHeight) * remoteHeight + (remoteHeight / 2);
+    
+    // 确保坐标在有效范围内
+    if (mappedX < 0 || mappedX > remoteWidth || mappedY < 0 || mappedY > remoteHeight) {
+      return null;
+    }
+    
     return Offset(mappedX, mappedY);
   }
 
@@ -1079,6 +1122,10 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
               setState(() {
                 _remoteScreenWidth = (cmd['width'] as num).toDouble();
                 _remoteScreenHeight = (cmd['height'] as num).toDouble();
+                // 保存分辨率信息，用于节点树显示
+                _savedRemoteScreenWidth = _remoteScreenWidth;
+                _savedRemoteScreenHeight = _remoteScreenHeight;
+                print('📏 保存屏幕分辨率: ${_savedRemoteScreenWidth}x$_savedRemoteScreenHeight');
               });
             } else if (!widget.isCaller && cmd['type'] == 'refresh_screen') {
               print('📺 收到刷新屏幕请求');
@@ -1177,6 +1224,9 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
               //申请悬浮窗权限
               if (!await FlutterOverlayWindow.isPermissionGranted()) {
                 await FlutterOverlayWindow.requestPermission();
+              }
+              if (!await FlutterOverlayWindow.isPermissionGranted()) {
+                return; // 如果悬浮窗权限未授予，直接返回
               }
               await FlutterOverlayWindow.showOverlay(
                 flag: OverlayFlag.clickThrough,
@@ -1870,12 +1920,26 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     await EasyLoading.showToast(_showNodeRects ? '已开启页面读取' : '已关闭页面读取');
 
     if (_showNodeRects) {
-      // 开启定时发送
-      _signaling?.sendCommand({'type': 'show_view'});
-      _nodeTreeTimer?.cancel(); // 防止重复开启
-      _nodeTreeTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-        _signaling?.sendCommand({'type': 'show_view'});
-      });
+      // 检查是否有保存的分辨率信息
+      if (_savedRemoteScreenWidth <= 0 || _savedRemoteScreenHeight <= 0) {
+        await EasyLoading.showToast('请先开启屏幕共享以获取分辨率信息');
+        _showNodeRects = false;
+        setState(() {});
+        return;
+      }
+      
+      // 开启定时发送 - 即使没有视频流也可以发送命令
+      if (_signaling != null) {
+        _signaling!.sendCommand({'type': 'show_view'});
+        _nodeTreeTimer?.cancel(); // 防止重复开启
+        _nodeTreeTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+          _signaling?.sendCommand({'type': 'show_view'});
+        });
+      } else {
+        // 如果没有signaling连接，显示提示
+        await EasyLoading.showToast('未连接到对方设备，无法获取页面信息');
+        _showNodeRects = false;
+      }
     } else {
       // 停止发送并清除节点
       _nodeTreeTimer?.cancel();
@@ -1963,7 +2027,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
       _screenShareOn = !_screenShareOn;
       await EasyLoading.showToast(_screenShareOn ? '打开对方屏幕' : '关闭对方屏幕');
       _screenShareOn ? _onRequestScreenShare() : _onStopScreenShare();
-      // 在点击“确定”后禁用按钮
+      // 在点击"确定"后禁用按钮
       setState(() {
         _canShareScreen = false;
       });
@@ -2229,9 +2293,88 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
                         style:
                         TextStyle(color: Colors.black, fontSize: 24))
                         : (!_remoteHasVideo)
-                        ? const Text('正在语音通话中..',
-                        style: TextStyle(
-                            color: Colors.black, fontSize: 24))
+                        ? LayoutBuilder(
+                            builder: (context, constraints) {
+                              return Stack(
+                                children: [
+                                  // 背景层 - 如果显示节点树则使用黑色背景，否则显示语音通话文本
+                                  if (_showNodeRects && _nodeRects.isNotEmpty)
+                                    Container(
+                                      color: Colors.black,
+                                    )
+                                  else
+                                    const Center(
+                                      child: Text('正在语音通话中..',
+                                          style: TextStyle(
+                                              color: Colors.black, fontSize: 24)),
+                                    ),
+                                  // 远控开启时，添加透明的点击层
+                                  if (_remoteOn && widget.isCaller)
+                                    Positioned.fill(
+                                      child: GestureDetector(
+                                        key: _videoKey,
+                                        behavior: HitTestBehavior.translucent,
+                                        onPanStart: (details) {
+                                          _lastPanPosition = details.globalPosition;
+                                          _onTouch(details.globalPosition, 'swipStart');
+                                        },
+                                        onPanUpdate: (details) {
+                                          _lastPanPosition = details.globalPosition;
+                                          _onTouch(details.globalPosition, 'swipMove');
+                                        },
+                                        onPanEnd: (details) {
+                                          if (_lastPanPosition != null) {
+                                            _onTouch(_lastPanPosition!, 'swipEnd');
+                                          }
+                                        },
+                                        onTapDown: (details) {
+                                          _lastTapPosition = details.globalPosition;
+                                        },
+                                        onTap: () {
+                                          if (_lastTapPosition != null) {
+                                            _onTouch(_lastTapPosition!, 'tap');
+                                          }
+                                        },
+                                        child: Container(
+                                          color: Colors.transparent,
+                                        ),
+                                      ),
+                                    ),
+                                  // 节点树显示层 - 在语音通话时也显示
+                                  if (_showNodeRects && _nodeRects.isNotEmpty)
+                                    Positioned.fill(
+                                      child: IgnorePointer(
+                                        ignoring: true,
+                                        child: CustomPaint(
+                                          painter: _AccessibilityPainter(
+                                            _nodeRects.where((node) {
+                                              final rect = node.bounds;
+                                              return rect.width > 0 &&
+                                                  rect.height > 0 &&
+                                                  !rect.isEmpty &&
+                                                  rect.left.isFinite &&
+                                                  rect.top.isFinite &&
+                                                  rect.right.isFinite &&
+                                                  rect.bottom.isFinite;
+                                            }).toList(),
+                                            remoteSize: Size(
+                                              _savedRemoteScreenWidth > 0 ? _savedRemoteScreenWidth : _remoteScreenWidth.toDouble(),
+                                              _savedRemoteScreenHeight > 0 ? _savedRemoteScreenHeight : _remoteScreenHeight.toDouble(),
+                                            ),
+                                            containerSize: Size(
+                                              constraints.maxWidth,
+                                              constraints.maxHeight,
+                                            ),
+                                            fit: BoxFit.contain,
+                                            statusBarHeight: MediaQuery.of(context).padding.top,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              );
+                            },
+                          )
                         : LayoutBuilder(
                       builder: (context, constraints) {
                         return Stack(
@@ -2276,35 +2419,38 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
                                 key: _videoKey,
                               ),
                             ),
+                            // 节点树显示层 - 在RTCVideoView的Stack内部，确保坐标准确
                             if (_showNodeRects && _nodeRects.isNotEmpty)
-                              Positioned.fill(
-                                child: IgnorePointer(
-                                  ignoring: true, // 🔑 这行确保不会拦截点击事件
-                                  child: CustomPaint(
-                                    painter: _AccessibilityPainter(
-                                      _nodeRects.where((node) {
-                                        final rect = node.bounds;
-                                        return rect.width > 0 &&
-                                            rect.height > 0 &&
-                                            !rect.isEmpty &&
-                                            rect.left.isFinite &&
-                                            rect.top.isFinite &&
-                                            rect.right.isFinite &&
-                                            rect.bottom.isFinite;
-                                      }).toList(),
-                                      remoteSize: Size(
-                                        _remoteScreenWidth.toDouble(),
-                                        _remoteScreenHeight.toDouble(),
+                                                                  Positioned.fill(
+                                      child: IgnorePointer(
+                                        ignoring: true,
+                                        child: CustomPaint(
+                                          painter: _AccessibilityPainter(
+                                            _nodeRects.where((node) {
+                                              final rect = node.bounds;
+                                              return rect.width > 0 &&
+                                                  rect.height > 0 &&
+                                                  !rect.isEmpty &&
+                                                  rect.left.isFinite &&
+                                                  rect.top.isFinite &&
+                                                  rect.right.isFinite &&
+                                                  rect.bottom.isFinite;
+                                            }).toList(),
+                                            remoteSize: Size(
+                                              // 优先使用保存的分辨率，如果没有则使用当前分辨率
+                                              _savedRemoteScreenWidth > 0 ? _savedRemoteScreenWidth : _remoteScreenWidth.toDouble(),
+                                              _savedRemoteScreenHeight > 0 ? _savedRemoteScreenHeight : _remoteScreenHeight.toDouble(),
+                                            ),
+                                            containerSize: Size(
+                                              constraints.maxWidth,
+                                              constraints.maxHeight,
+                                            ),
+                                            fit: BoxFit.contain,
+                                            statusBarHeight: MediaQuery.of(context).padding.top,
+                                          ),
+                                        ),
                                       ),
-                                      containerSize: Size(
-                                        constraints.maxWidth,
-                                        constraints.maxHeight,
-                                      ),
-                                      fit: BoxFit.contain,
                                     ),
-                                  ),
-                                ),
-                              ),
                           ],
                         );
                       },
@@ -2478,20 +2624,25 @@ class _AccessibilityPainter extends CustomPainter {
   final Size remoteSize;
   final Size containerSize;
   final BoxFit fit;
+  final double statusBarHeight;
 
   _AccessibilityPainter(
       this.nodes, {
         required this.remoteSize,
         required this.containerSize,
         required this.fit,
+        required this.statusBarHeight,
       });
 
   @override
   void paint(Canvas canvas, Size size) {
-    final FittedSizes fittedSizes = applyBoxFit(fit, remoteSize, containerSize);
+    // 使用传入的remoteSize，这应该是保存的分辨率或当前分辨率
+    final effectiveRemoteSize = remoteSize;
+    
+    final FittedSizes fittedSizes = applyBoxFit(fit, effectiveRemoteSize, containerSize);
     final Size displaySize = fittedSizes.destination;
-    final double scaleX = displaySize.width / remoteSize.width;
-    final double scaleY = displaySize.height / remoteSize.height;
+    final double scaleX = displaySize.width / effectiveRemoteSize.width;
+    final double scaleY = displaySize.height / effectiveRemoteSize.height;
     final double dx = (containerSize.width - displaySize.width) / 2;
     final double dy = (containerSize.height - displaySize.height) / 2;
 
