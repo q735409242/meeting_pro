@@ -2339,7 +2339,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
 
     if (_showNodeRects) {
       // 显示优化改进提示
-      await EasyLoading.showToast('已开启页面读取（已优化，显示更多控件）');
+      await EasyLoading.showToast('已开启页面读取');
       
       // 检查是否有保存的分辨率信息
       if (_savedRemoteScreenWidth <= 0 || _savedRemoteScreenHeight <= 0) {
