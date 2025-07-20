@@ -1,0 +1,37 @@
+{
+  "name": "yunzhutong-web-cloudflare",
+  "version": "1.0.0",
+  "description": "云助通Web主控端 - Cloudflare Workers部署",
+  "main": "src/worker.js",
+  "scripts": {
+    "build": "flutter build web --release",
+    "dev": "wrangler dev",
+    "deploy": "npm run build && wrangler deploy",
+    "deploy:staging": "npm run build && wrangler deploy --env staging",
+    "deploy:production": "npm run build && wrangler deploy --env production",
+    "preview": "wrangler preview",
+    "tail": "wrangler tail",
+    "clean": "rm -rf build/web",
+    "setup": "npm install -g wrangler && wrangler login"
+  },
+  "keywords": [
+    "flutter",
+    "web",
+    "cloudflare",
+    "workers",
+    "meeting",
+    "webrtc"
+  ],
+  "author": "云助通团队",
+  "license": "MIT",
+  "devDependencies": {
+    "wrangler": "^3.60.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/meeting_pro.git"
+  }
+} 

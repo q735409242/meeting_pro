@@ -1,0 +1,116 @@
+/* Web性能优化样式 */
+
+/* 全局性能优化 */
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden; /* 防止不必要的滚动 */
+}
+
+/* Flutter容器优化 */
+flt-glass-pane {
+  pointer-events: none !important;
+}
+
+/* 针对WebRTC视频的优化 */
+video {
+  object-fit: contain;
+  transform: translateZ(0); /* 启用硬件加速 */
+  will-change: transform;
+}
+
+/* Canvas优化 */
+canvas {
+  image-rendering: optimizeSpeed;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: optimize-contrast;
+  transform: translateZ(0); /* 启用硬件加速 */
+}
+
+/* 减少重绘和回流 */
+.flutter-view {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+/* 提升滚动性能 */
+.scrollable {
+  -webkit-overflow-scrolling: touch;
+  transform: translateZ(0);
+}
+
+/* 字体加载优化 */
+.font-loading {
+  font-display: swap;
+  visibility: hidden;
+}
+
+.font-loaded {
+  visibility: visible;
+  transition: visibility 0.1s ease;
+}
+
+/* 响应式优化 */
+@media (max-width: 768px) {
+  body {
+    touch-action: manipulation; /* 优化触摸响应 */
+  }
+}
+
+/* 高DPI屏幕优化 */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  canvas {
+    image-rendering: pixelated;
+  }
+}
+
+/* Dark mode支持 */
+@media (prefers-color-scheme: dark) {
+  #loading {
+    background: #121212 !important;
+    color: #ffffff !important;
+  }
+  
+  .loading-text {
+    color: #ffffff !important;
+  }
+}
+
+/* 减少动画卡顿 */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* 内存优化 - 限制图片大小 */
+img {
+  max-width: 100%;
+  height: auto;
+  image-rendering: auto;
+}
+
+/* WebGL性能优化 */
+.webgl-content {
+  transform: translateZ(0);
+  will-change: transform;
+  backface-visibility: hidden;
+} 
