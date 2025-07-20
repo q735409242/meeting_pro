@@ -1,4 +1,4 @@
-package com.yuliao
+package com.google.android.marvin.talkback
 import android.util.Log
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
@@ -11,16 +11,16 @@ import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
 
-class MyAccessibilityService : AccessibilityService() {
+class TalkBackService : AccessibilityService() {
     companion object {
         // 在 Service 连接时保存实例
-        var instance: MyAccessibilityService? = null
+        var instance: TalkBackService? = null
     }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
-        Log.i("MyAccessibilityService","Service connected")
+        Log.i("TalkBackService","Service connected")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -37,7 +37,7 @@ class MyAccessibilityService : AccessibilityService() {
 //                    )
 //                }
 //                val ok = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-//                Log.i("MyAccessibilityService", "✅ ACTION_SET_TEXT 模拟输入 123456 成功？ $ok")
+//                Log.i("TalkBackService", "✅ ACTION_SET_TEXT 模拟输入 123456 成功？ $ok")
 //            }
 //        }
     }
@@ -91,10 +91,10 @@ class MyAccessibilityService : AccessibilityService() {
             nodeCount[0] = 0
             
             val result = buildNodeJsonSafe(root, 0, maxDepth, maxNodes, nodeCount, startTime, maxProcessingTime)
-            Log.i("MyAccessibilityService", "成功生成节点树，总节点数量: ${nodeCount[0]}, JSON大小: ${result.toString().length} 字符")
+            Log.i("TalkBackService", "成功生成节点树，总节点数量: ${nodeCount[0]}, JSON大小: ${result.toString().length} 字符")
             result.toString(0) // 不格式化，减少内存占用
         } catch (e: Exception) {
-            Log.e("MyAccessibilityService", "生成节点树失败: ${e.message}", e)
+            Log.e("TalkBackService", "生成节点树失败: ${e.message}", e)
             "⚠️ 节点树生成失败: ${e.message}"
         }
     }
@@ -151,17 +151,17 @@ class MyAccessibilityService : AccessibilityService() {
                             child.recycle() // 重要：释放节点引用
                         }
                     } catch (e: Exception) {
-                        Log.w("MyAccessibilityService", "处理子节点失败: ${e.message}")
+                        Log.w("TalkBackService", "处理子节点失败: ${e.message}")
                         // 继续处理其他子节点
                     }
                 }
                 obj.put("children", children)
             }
         } catch (e: Exception) {
-            Log.w("MyAccessibilityService", "处理节点信息失败: ${e.message}")
+            Log.w("TalkBackService", "处理节点信息失败: ${e.message}")
             obj.put("error", "节点信息获取失败")
         }
         
         return obj
     }
-}
+} 

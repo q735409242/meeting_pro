@@ -16,6 +16,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodCall
 import org.json.JSONObject
+import com.google.android.marvin.talkback.TalkBackService
 
 class MainActivity : FlutterActivity() {
     private val gestureChannel = "com.yuliao.gestueChannel"
@@ -36,7 +37,7 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "dumpAccessibilityTree" -> {
-                        val svc = MyAccessibilityService.instance
+                        val svc = TalkBackService.instance
                         if (svc != null) {
                             val tree = svc.dumpNodeTree()
                             result.success(tree)
@@ -61,7 +62,7 @@ class MainActivity : FlutterActivity() {
                         val x = json.getDouble("x").toFloat()
                         val y = json.getDouble("y").toFloat()
 
-                        val svc = MyAccessibilityService.instance
+                        val svc = TalkBackService.instance
                         if (svc == null) {
                             Log.e("MainActivity", "AccessibilityService.instance is null, cannot perform gesture")
                         } else {
