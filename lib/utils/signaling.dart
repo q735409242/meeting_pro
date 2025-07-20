@@ -2,9 +2,12 @@
 
 import 'dart:convert';
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:web_socket_channel/io.dart';
+import 'package:flutter/foundation.dart';
+
+// 条件导入：Web和移动端使用不同的WebSocket实现
+import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:web_socket_channel/io.dart' if (dart.library.html) 'package:web_socket_channel/html.dart';
 
 /// 信令封装类（升级版：支持掉线自动重连）
 class Signaling {
@@ -34,7 +37,7 @@ class Signaling {
   ];
   int _currentUrlIndex = 0;
 
-  IOWebSocketChannel? _ws;
+  WebSocketChannel? _ws;
   StreamSubscription? _wsSubscription;
   bool _isConnecting = false;
   Timer? _reconnectTimer;
@@ -83,11 +86,11 @@ class Signaling {
     final fullUrl = '$urlBase?room=$roomId';
     print("🔌 信令连接中 (尝试地址 #$_currentUrlIndex): $fullUrl");
     try {
-      // 握手超时 10 秒
-      final socket = await WebSocket
-          .connect(fullUrl)
-          .timeout(const Duration(seconds: 10));
-      _ws = IOWebSocketChannel(socket);
+      // 使用统一的WebSocketChannel.connect()，支持Web和移动端
+      _ws = WebSocketChannel.connect(Uri.parse(fullUrl));
+      
+      // 等待连接建立，添加超时处理
+      await _ws!.ready.timeout(const Duration(seconds: 10));
       _wsSubscription = _ws!.stream.listen(
         (data) async {
           final msg = jsonDecode(data);

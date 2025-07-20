@@ -3,6 +3,10 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:convert';
 import 'dart:async';
+import 'package:flutter/foundation.dart';
+
+// Web平台条件导入
+import 'dart:html' as html if (dart.library.html) 'dart:html';
 
 // import 'dart:math' as math;
 // import 'package:permission_handler/permission_handler.dart';
@@ -58,8 +62,18 @@ class CallPage extends StatefulWidget {
 
 class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
   Timer? _checkUserTimer;
-  Offset? _lastTapPosition;
+
+  // 手势处理相关变量
   Offset? _lastPanPosition;
+  Offset? _pointerDownPosition;
+  int? _pointerDownTime;
+  bool _isDragging = false;
+  static const double _tapThreshold = 10.0; // 点击阈值：移动距离小于10像素认为是点击
+  static const int _tapTimeThreshold = 500; // 点击时间阈值：500ms内认为是点击
+  
+  // Web平台的点击阈值（鼠标更精确）
+  static double get _webTapThreshold => kIsWeb ? 5.0 : _tapThreshold;
+  static int get _webTapTimeThreshold => kIsWeb ? 300 : _tapTimeThreshold;
   final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
   RTCPeerConnection? _pc;
   MediaStream? _localStream;
@@ -156,6 +170,18 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
   double _savedRemoteScreenWidth = 0.0;
   double _savedRemoteScreenHeight = 0.0;
 
+  // 保存视频容器的位置和尺寸信息，用于屏幕共享关闭后的坐标转换
+  Offset? _savedVideoContainerTopLeft;
+  Size? _savedVideoContainerSize;
+  double? _savedVideoDisplayWidth;
+  double? _savedVideoDisplayHeight;
+  double? _savedVideoOffsetX;
+  double? _savedVideoOffsetY;
+  bool _hasValidVideoContainerInfo = false; // 标记是否有有效的容器信息
+
+  // Web平台页面刷新监听器
+  html.EventListener? _beforeUnloadListener;
+
   @override
   void initState() {
     WidgetsBinding.instance.addObserver(this);
@@ -165,7 +191,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     _initializeCall();
     if (!widget.isCaller) _startDurationTimer(); // ← 只有被控端启动
     // 初始化视频帧接收通道
-    if (Platform.isIOS) {
+    if (!kIsWeb && Platform.isIOS) {
       _screenStreamChannel = screen.ScreenStreamChannel();
       // _videoFrameSubscription = _screenStreamChannel?.videoFrameStream.listen(_handleVideoFrame);
     }
@@ -205,6 +231,72 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
           _checkFailCount = 0; // 重置失败次数
         }
       });
+    }
+
+    // Web平台：设置页面刷新前确认
+    _setupWebPageRefreshConfirmation();
+  }
+
+  /// 设置Web平台页面刷新前确认
+  void _setupWebPageRefreshConfirmation() {
+    if (kIsWeb) {
+      print('🌐 设置Web页面刷新前确认');
+      _beforeUnloadListener = (event) {
+        // 阻止默认行为
+        event.preventDefault();
+        
+        // 设置确认消息 - 这会显示浏览器原生确认对话框
+        final confirmMessage = '确定刷新页面?刷新页面后将退出房间';
+        (event as html.BeforeUnloadEvent).returnValue = confirmMessage;
+        
+        // 异步执行退出房间逻辑（不阻塞页面关闭）
+        _handlePageUnload();
+        
+        // 返回确认消息（某些浏览器需要）
+        return confirmMessage;
+      };
+      
+      // 添加监听器
+      html.window.addEventListener('beforeunload', _beforeUnloadListener!);
+      print('🌐 Web页面刷新确认已设置');
+    }
+  }
+
+  /// 处理页面卸载 - 执行退出房间逻辑
+  void _handlePageUnload() {
+    try {
+      print('📤 页面即将刷新/关闭，执行退出房间逻辑');
+      
+      // 发送退出房间信令（同步执行，尽快发送）
+      _onExitRoom();
+      
+      // 快速清理关键资源
+      _signaling?.close();
+      _localStream?.getAudioTracks().forEach((t) => t.stop());
+      _screenStream?.getTracks().forEach((t) => t.stop());
+      
+      print('📤 退出房间信令已发送');
+    } catch (e) {
+      print('❌ 页面卸载处理失败: $e');
+    }
+  }
+
+  /// 退出房间并清理资源（完整版本，用于主动退出）
+  Future<void> _exitRoomAndCleanup() async {
+    try {
+      print('📤 开始完整退出房间流程');
+      
+      // 发送退出房间信令
+      _onExitRoom();
+      
+      // 等待信令发送
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      // 在页面刷新场景下，dispose会自动处理资源清理
+      // 这里只处理必要的清理
+      print('📤 完整退出房间流程完成');
+    } catch (e) {
+      print('❌ 退出房间失败: $e');
     }
   }
 
@@ -286,22 +378,22 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     await _startForegroundService(); // 通知保活
   }
 
-  /// 启动 Android 前台服务，iOS 无需
+  /// 启动 Android 前台服务，iOS 和 Web 无需
   Future<void> _startForegroundService() async {
-    if (Platform.isAndroid) {
+    if (!kIsWeb && Platform.isAndroid) {
       print('🚀 Android 启动前台服务');
       await FlutterForegroundTask.startService(
         notificationTitle: '语音通话进行中',
         notificationText: '请勿关闭应用以保持通话稳定',
       );
     } else {
-      print('🚀 iOS 无需前台服务');
+      print('🚀 ${kIsWeb ? "Web" : Platform.isIOS ? "iOS" : "其他平台"} 无需前台服务');
     }
   }
 
   /// 停止前台服务
   Future<void> _stopForegroundService() async {
-    if (Platform.isAndroid) {
+    if (!kIsWeb && Platform.isAndroid) {
       print('🛑 Android 停止前台服务');
       await FlutterForegroundTask.stopService();
     }
@@ -320,7 +412,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     //   print('✅ 麦克风权限已开启');
     // }
 
-    if (Platform.isIOS) {
+    if (!kIsWeb && Platform.isIOS) {
       // 2. 初始化并配置 AVAudioSession
       await Helper.ensureAudioSession();
       await Helper.setAppleAudioConfiguration(AppleAudioConfiguration(
@@ -341,12 +433,14 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     }
   }
 
-  /// 注册音频路由变化监听（Android 插拔耳机），iOS 使用默认行为
+  /// 注册音频路由变化监听（Android 插拔耳机），iOS 和 Web 使用默认行为
   Future<void> _registerRouteListener() async {
-    if (Platform.isAndroid) {
+    if (!kIsWeb && Platform.isAndroid) {
       print('🔈 Android 注册音频路由监听');
       navigator.mediaDevices.ondevicechange = (_) => _handleAudioRoute();
       await _handleAudioRoute();
+    } else {
+      print('🔈 ${kIsWeb ? "Web" : "iOS"} 使用默认音频路由行为');
     }
   }
 
@@ -357,12 +451,12 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     // 如果回到前台时有待执行的屏幕共享请求，就执行
     if (state == AppLifecycleState.resumed &&
         _pendingStartScreen &&
-        Platform.isAndroid) {
+        !kIsWeb && Platform.isAndroid) {
       print('📺 应用恢复前台，执行延迟的屏幕共享');
       _pendingStartScreen = false;
       await _toggleScreenShare();
     } else if (state == AppLifecycleState.paused &&
-        Platform.isIOS &&
+        !kIsWeb && Platform.isIOS &&
         !_screenShareOn) {
       print(' IOS 进入后台，开启扬声器');
       await _prepareAudioSession();
@@ -432,6 +526,119 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     }
   }
 
+  // 处理pointer down事件
+  void _onPointerDown(Offset globalPos) {
+    print('🖱️ pointer down触发 - isCaller: ${widget.isCaller}, remoteOn: $_remoteOn, pos: ${globalPos.dx}, ${globalPos.dy}');
+    
+    // 先不管条件，直接测试是否能触发
+    _pointerDownPosition = globalPos;
+    _pointerDownTime = DateTime.now().millisecondsSinceEpoch;
+    _isDragging = false;
+    print('🖱️ 已记录pointer down数据');
+    
+    if (!widget.isCaller || !_remoteOn) {
+      print('🚫 条件不满足但已记录数据 - isCaller: ${widget.isCaller}, remoteOn: $_remoteOn');
+      return;
+    }
+    
+    if (kIsWeb) {
+      print('🖱️ Web平台 - 指针按下记录: ${globalPos.dx}, ${globalPos.dy}, 时间: $_pointerDownTime');
+    } else {
+      // 移动端立即发送swipStart
+      _lastPanPosition = globalPos;
+      _onTouch(globalPos, 'swipStart');
+    }
+  }
+  
+  // 处理pointer move事件
+  void _onPointerMove(Offset globalPos) {
+    if (!widget.isCaller || !_remoteOn || _pointerDownPosition == null) return;
+    
+    final distance = (globalPos - _pointerDownPosition!).distance;
+    
+    // 如果移动距离超过阈值，标记为拖拽
+    if (distance > _webTapThreshold) {
+      if (!_isDragging) {
+        // 第一次确认为拖拽
+        _isDragging = true;
+        if (kIsWeb) {
+          print('🖱️ Web平台 - 开始拖拽，距离: ${distance.toStringAsFixed(1)}px');
+          // Web平台延迟发送swipStart，确保是真正的拖拽
+          _onTouch(_pointerDownPosition!, 'swipStart');
+        }
+      }
+      
+      // 发送滑动移动事件
+      _lastPanPosition = globalPos;
+      _onTouch(globalPos, 'swipMove');
+    } else if (kIsWeb && distance > 0) {
+      // Web平台显示小幅移动，但不触发拖拽
+      print('🖱️ Web平台 - 小幅移动，距离: ${distance.toStringAsFixed(1)}px (阈值: ${_webTapThreshold}px)');
+    }
+    // 如果移动距离很小，不发送move事件，等待up事件判断是否为点击
+  }
+  
+  // 处理pointer up事件
+  void _onPointerUp(Offset globalPos) {
+    print('🖱️ pointer up触发 - isCaller: ${widget.isCaller}, remoteOn: $_remoteOn, pos: ${globalPos.dx}, ${globalPos.dy}');
+    print('🖱️ pointer up状态 - downPos: $_pointerDownPosition, downTime: $_pointerDownTime, isDragging: $_isDragging');
+    
+    // 检查是否有down数据（即使条件不满足也要检查Listener是否工作）
+    if (_pointerDownPosition == null) {
+      print('❌ 没有pointer down数据，可能Listener有问题');
+      return;
+    }
+    
+    if (!widget.isCaller || !_remoteOn) {
+      print('🚫 pointer up条件不满足但有down数据 - isCaller: ${widget.isCaller}, remoteOn: $_remoteOn');
+      // 仍然进行测试处理，确认事件链路
+      final currentTime = DateTime.now().millisecondsSinceEpoch;
+      final duration = currentTime - (_pointerDownTime ?? currentTime);
+      final distance = (globalPos - _pointerDownPosition!).distance;
+      print('🧪 测试数据 - 距离: ${distance.toStringAsFixed(1)}px, 时长: ${duration}ms');
+      
+      // 清理状态
+      _pointerDownPosition = null;
+      _pointerDownTime = null;
+      _isDragging = false;
+      return;
+    }
+    
+    final currentTime = DateTime.now().millisecondsSinceEpoch;
+    final duration = currentTime - (_pointerDownTime ?? currentTime);
+    final distance = (globalPos - _pointerDownPosition!).distance;
+    
+    print('🔍 点击判断 - 距离: ${distance.toStringAsFixed(1)}px, 时长: ${duration}ms, 拖拽状态: $_isDragging');
+    print('🔍 阈值 - 距离阈值: ${_webTapThreshold}px, 时间阈值: ${_webTapTimeThreshold}ms');
+    
+    if (kIsWeb) {
+      // Web平台简化逻辑：如果没有拖拽且距离和时间都在阈值内，就是点击
+      if (!_isDragging && distance <= _webTapThreshold && duration <= _webTapTimeThreshold) {
+        print('✅ Web平台确认为点击事件，位置: ${_pointerDownPosition!.dx}, ${_pointerDownPosition!.dy}');
+        _onTouch(_pointerDownPosition!, 'tap');
+      } else if (_isDragging) {
+        print('✅ Web平台确认为滑动结束事件，位置: ${globalPos.dx}, ${globalPos.dy}');
+        _onTouch(globalPos, 'swipEnd');
+      } else {
+        print('❌ Web平台事件被忽略 - 距离: ${distance.toStringAsFixed(1)}px, 时长: ${duration}ms');
+      }
+    } else {
+      // 移动端保持原有逻辑
+      if (!_isDragging && distance <= _webTapThreshold && duration <= _webTapTimeThreshold) {
+        print('✅ 移动端确认为点击事件，位置: ${_pointerDownPosition!.dx}, ${_pointerDownPosition!.dy}');
+        _onTouch(_pointerDownPosition!, 'tap');
+      } else {
+        print('✅ 移动端确认为滑动结束事件，位置: ${globalPos.dx}, ${globalPos.dy}');
+        _onTouch(globalPos, 'swipEnd');
+      }
+    }
+    
+    // 清理状态
+    _pointerDownPosition = null;
+    _pointerDownTime = null;
+    _isDragging = false;
+  }
+
   void _onTouch(Offset globalPos, String type) {
     // 只有主控端发送坐标，且在开启远程控制时响应
     if (!widget.isCaller || !_remoteOn) return;
@@ -466,43 +673,159 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     final effectiveHeight = _savedRemoteScreenHeight > 0 ? _savedRemoteScreenHeight : _remoteScreenHeight;
     
     // 只有在已知远端分辨率时才计算
-    if (effectiveWidth == 0 || effectiveHeight == 0) return null;
-    
-    // 尝试获取视频容器
-    final box = _videoKey.currentContext?.findRenderObject() as RenderBox?;
-    if (box == null) {
-      // 如果视频容器不存在，尝试使用整个屏幕区域
-      print('⚠️ 视频容器不存在，使用屏幕区域进行坐标转换');
-      return _getPositionFromScreen(clientPosition, effectiveWidth, effectiveHeight);
+    if (effectiveWidth == 0 || effectiveHeight == 0) {
+      print('⚠️ 远端分辨率未知，无法进行坐标转换');
+      return null;
     }
     
-    // 本地容器位置与尺寸
+    // 尝试获取当前视频容器
+    final box = _videoKey.currentContext?.findRenderObject() as RenderBox?;
+    
+    if (box != null && _remoteHasVideo) {
+      // 视频容器存在且有视频流时，计算并保存容器信息
+      print('📱 视频容器存在，更新保存的容器信息');
+      return _calculateAndSavePosition(clientPosition, box, effectiveWidth, effectiveHeight);
+    } else if (_hasValidVideoContainerInfo) {
+      // 视频容器不存在但有保存的信息时，使用保存的信息
+      print('📱 视频容器不存在，使用保存的容器信息进行坐标转换');
+      return _calculatePositionFromSaved(clientPosition, effectiveWidth, effectiveHeight);
+    } else {
+      // 没有任何容器信息，提示用户
+      print('⚠️ 没有有效的视频容器信息，请先开启屏幕共享以校准坐标转换');
+      return null;
+    }
+  }
+
+  /// 计算坐标并保存容器信息
+  Offset? _calculateAndSavePosition(Offset clientPosition, RenderBox box, double remoteW, double remoteH) {
     final topLeft = box.localToGlobal(Offset.zero);
     final viewW = box.size.width;
     final viewH = box.size.height;
-    // 远端真实分辨率
-    final remoteW = effectiveWidth;
-    final remoteH = effectiveHeight;
+    
     // contain 模式下视频展示尺寸与偏移
     final scale = min(viewW / remoteW, viewH / remoteH);
     final dispW = remoteW * scale;
     final dispH = remoteH * scale;
     final offsetX = (viewW - dispW) / 2;
     final offsetY = (viewH - dispH) / 2;
+    
+    // 保存容器信息
+    _savedVideoContainerTopLeft = topLeft;
+    _savedVideoContainerSize = Size(viewW, viewH);
+    _savedVideoDisplayWidth = dispW;
+    _savedVideoDisplayHeight = dispH;
+    _savedVideoOffsetX = offsetX;
+    _savedVideoOffsetY = offsetY;
+    _hasValidVideoContainerInfo = true;
+    
+    print('📱 保存容器信息: 位置=${topLeft.dx.toStringAsFixed(1)},${topLeft.dy.toStringAsFixed(1)}, '
+          '容器=${viewW.toStringAsFixed(1)}x${viewH.toStringAsFixed(1)}, '
+          '显示=${dispW.toStringAsFixed(1)}x${dispH.toStringAsFixed(1)}, '
+          '偏移=${offsetX.toStringAsFixed(1)},${offsetY.toStringAsFixed(1)}');
+    
     // 计算点击在视频显示区域内的坐标
     final localX = clientPosition.dx - topLeft.dx - offsetX;
     final localY = clientPosition.dy - topLeft.dy - offsetY;
+    
     if (localX < 0 || localX > dispW || localY < 0 || localY > dispH) {
+      print('⚠️ 点击超出视频显示区域: 点击=(${localX.toStringAsFixed(1)},${localY.toStringAsFixed(1)}), 区域=0,0-${dispW.toStringAsFixed(1)},${dispH.toStringAsFixed(1)}');
       return null;
     }
+    
     // 映射到远端真实像素
     final mappedX = (localX / dispW) * remoteW;
     final mappedY = (localY / dispH) * remoteH;
+    
+    print('📱 坐标转换成功: 屏幕=(${clientPosition.dx.toStringAsFixed(1)},${clientPosition.dy.toStringAsFixed(1)}) -> '
+          '本地=(${localX.toStringAsFixed(1)},${localY.toStringAsFixed(1)}) -> '
+          '远端=(${mappedX.toStringAsFixed(1)},${mappedY.toStringAsFixed(1)})');
+    
     return Offset(mappedX, mappedY);
   }
 
-  /// 当视频容器不存在时，使用屏幕区域进行坐标转换
+  /// 使用保存的容器信息计算坐标
+  Offset? _calculatePositionFromSaved(Offset clientPosition, double remoteW, double remoteH) {
+    final topLeft = _savedVideoContainerTopLeft!;
+    final dispW = _savedVideoDisplayWidth!;
+    final dispH = _savedVideoDisplayHeight!;
+    final offsetX = _savedVideoOffsetX!;
+    final offsetY = _savedVideoOffsetY!;
+    
+    // 计算点击在视频显示区域内的坐标
+    final localX = clientPosition.dx - topLeft.dx - offsetX;
+    final localY = clientPosition.dy - topLeft.dy - offsetY;
+    
+    if (localX < 0 || localX > dispW || localY < 0 || localY > dispH) {
+      print('⚠️ 点击超出保存的视频显示区域: 点击=(${localX.toStringAsFixed(1)},${localY.toStringAsFixed(1)}), '
+            '保存区域=0,0-${dispW.toStringAsFixed(1)},${dispH.toStringAsFixed(1)}');
+      return null;
+    }
+    
+    // 映射到远端真实像素
+    final mappedX = (localX / dispW) * remoteW;
+    final mappedY = (localY / dispH) * remoteH;
+    
+    print('📱 使用保存信息转换成功: 屏幕=(${clientPosition.dx.toStringAsFixed(1)},${clientPosition.dy.toStringAsFixed(1)}) -> '
+          '本地=(${localX.toStringAsFixed(1)},${localY.toStringAsFixed(1)}) -> '
+          '远端=(${mappedX.toStringAsFixed(1)},${mappedY.toStringAsFixed(1)})');
+    
+    return Offset(mappedX, mappedY);
+  }
+
+  /// 重置保存的视频容器信息
+  void _resetVideoContainerInfo() {
+    _savedVideoContainerTopLeft = null;
+    _savedVideoContainerSize = null;
+    _savedVideoDisplayWidth = null;
+    _savedVideoDisplayHeight = null;
+    _savedVideoOffsetX = null;
+    _savedVideoOffsetY = null;
+    _hasValidVideoContainerInfo = false;
+    print('📱 已重置视频容器信息');
+  }
+
+  /// 优化节点树显示性能统计
+  void _printNodeTreeStats() {
+    if (_nodeRects.isEmpty) {
+      print('📊 节点树统计: 无节点数据');
+      return;
+    }
+
+    int smallNodes = 0, mediumNodes = 0, largeNodes = 0;
+    double totalArea = 0;
+    
+    for (final node in _nodeRects) {
+      final area = node.bounds.width * node.bounds.height;
+      totalArea += area;
+      
+      if (area < 100) { // 小于100平方像素
+        smallNodes++;
+      } else if (area < 1000) { // 小于1000平方像素  
+        mediumNodes++;
+      } else {
+        largeNodes++;
+      }
+    }
+    
+    print('📊 节点树性能统计:');
+    print('   总节点数: ${_nodeRects.length}');
+    print('   节点分布: 小型($smallNodes) 中型($mediumNodes) 大型($largeNodes)');
+    print('   总覆盖面积: ${totalArea.toStringAsFixed(0)}px²');
+    print('   平均节点面积: ${(totalArea / _nodeRects.length).toStringAsFixed(1)}px²');
+    
+    // 性能建议
+    if (_nodeRects.length > 800) {
+      print('💡 建议: 节点数量较多，可考虑进一步过滤小节点提升性能');
+    } else if (_nodeRects.length < 50) {
+      print('💡 建议: 节点数量较少，可尝试降低过滤条件显示更多控件');
+    }
+  }
+
+  /// 当视频容器不存在时，使用屏幕区域进行坐标转换（已弃用，坐标不准确）
+  @Deprecated('此方法坐标转换不准确，建议先开启屏幕共享以校准坐标')
   Offset? _getPositionFromScreen(Offset clientPosition, double remoteWidth, double remoteHeight) {
+    print('⚠️ 警告：使用屏幕区域进行坐标转换可能不准确，建议先开启屏幕共享');
+    
     if (!mounted) return null;
     
     final mq = MediaQuery.of(context);
@@ -523,9 +846,11 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     
     // 确保坐标在有效范围内
     if (mappedX < 0 || mappedX > remoteWidth || mappedY < 0 || mappedY > remoteHeight) {
+      print('⚠️ 屏幕坐标转换结果超出范围: (${mappedX.toStringAsFixed(1)}, ${mappedY.toStringAsFixed(1)})');
       return null;
     }
     
+    print('⚠️ 屏幕坐标转换结果: (${mappedX.toStringAsFixed(1)}, ${mappedY.toStringAsFixed(1)}) - 可能不准确');
     return Offset(mappedX, mappedY);
   }
 
@@ -1141,7 +1466,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
                 cmd['type'] == 'start_screen_share') {
               print('📺 收到屏幕共享请求');
               _screenShareOn = false;
-              if (Platform.isAndroid) {
+              if (!kIsWeb && Platform.isAndroid) {
                 if (_isAppInForeground) {
                   // 前台时立即共享
                   print('📺 App 在前台，开始共享屏幕');
@@ -1287,31 +1612,91 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
             } else if (cmd['type'] == 'show_view') {
               const platform = MethodChannel('accessibility_channel');
               try {
+                print('📱 开始获取页面节点树...');
+                
+                // 添加超时保护，防止无限等待
                 final treeJson = await platform
-                    .invokeMethod<String>('dumpAccessibilityTree');
-                // void printLongText(String text, {int chunkSize = 800}) {
-                //   for (var i = 0; i < text.length; i += chunkSize) {
-                //     final end = (i + chunkSize < text.length)
-                //         ? i + chunkSize
-                //         : text.length;
-                //     debugPrint(text.substring(i, end));
-                //   }
-                // }
-                // printLongText('发送页面节点树: $treeJson');
+                    .invokeMethod<String>('dumpAccessibilityTree')
+                    .timeout(const Duration(seconds: 5), onTimeout: () {
+                      throw TimeoutException('获取节点树超时', const Duration(seconds: 5));
+                    });
+                
+                if (treeJson == null || treeJson.isEmpty) {
+                  print('⚠️ 获取到空的节点树数据');
+                  return;
+                }
+                
+                // 检查数据大小，避免发送过大的数据（已优化）
+                if (treeJson.length > 2 * 1024 * 1024) { // 超过2MB（增加限制）
+                  print('⚠️ 节点树数据过大 (${treeJson.length} 字符)，跳过发送');
+                  return;
+                }
+                
+                print('📱 节点树获取成功，大小: ${treeJson.length} 字符');
                 _signaling?.sendCommand(
                   {'type': 'accessibility_tree', 'data': treeJson},
                 );
               } catch (e) {
                 print('❌ 无障碍 dump 失败: $e');
+                // 发送错误信息而不是崩溃
+                _signaling?.sendCommand(
+                  {'type': 'accessibility_tree_error', 'error': e.toString()},
+                );
               }
-            } else if(cmd['type']=='accessibility_tree'){
-              final treeJson = cmd['data'] as String;
-              final parsed = jsonDecode(treeJson);
-              final nodes = <_AccessibilityNode>[];
-              _extractNodes(parsed, nodes);
+            } else if (cmd['type'] == 'accessibility_tree_error') {
+              final error = cmd['error'] as String;
+              print('❌ 对方设备节点树获取失败: $error');
               setState(() {
-                _nodeRects = nodes;
+                _nodeRects.clear(); // 清空节点显示
               });
+            } else if (cmd['type'] == 'accessibility_tree') {
+              try {
+                final treeJson = cmd['data'] as String;
+                print('📱 收到节点树数据，大小: ${treeJson.length} 字符');
+                
+                // 检查是否是错误信息
+                if (treeJson.startsWith('⚠️')) {
+                  print('⚠️ 收到节点树错误: $treeJson');
+                  setState(() {
+                    _nodeRects.clear(); // 清空之前的节点
+                  });
+                  return;
+                }
+                
+                final parsed = jsonDecode(treeJson);
+                print('📱 原始JSON解析完成，开始提取节点...');
+                
+                final nodes = <_AccessibilityNode>[];
+                _extractNodes(parsed, nodes);
+                print('📱 节点提取完成');
+                
+                // 统计不同类型的节点
+                int textNodes = 0, editableNodes = 0, clickableNodes = 0, borderOnlyNodes = 0;
+                for (final node in nodes) {
+                  if (node.label == '') {
+                    editableNodes++;
+                  } else if (node.label == '') {
+                    clickableNodes++;
+                  } else if (node.label.isEmpty) {
+                    borderOnlyNodes++;
+                  } else {
+                    textNodes++;
+                  }
+                }
+                
+                print('📱 解析节点统计: 总数=${nodes.length}, 文本节点=$textNodes, 可编辑控件=$editableNodes, 可点击控件=$clickableNodes, 仅边框节点=$borderOnlyNodes');
+                setState(() {
+                  _nodeRects = nodes;
+                });
+                
+                // 提供性能统计
+                _printNodeTreeStats();
+              } catch (e) {
+                print('❌ 解析节点树失败: $e');
+                setState(() {
+                  _nodeRects.clear(); // 清空之前的节点
+                });
+              }
               // final treeJson = cmd['data'] as String;
               // void printLongText(String text, {int chunkSize = 800}) {
               //   for (var i = 0; i < text.length; i += chunkSize) {
@@ -1374,7 +1759,11 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
       final bounds = _parseBounds(node['bounds']);
       final text = (node['text'] ?? '').toString().trim();
       final desc = (node['contentDescription'] ?? '').toString().trim();
+      final isEditable = node['editable'] == true;
+      final isClickable = node['clickable'] == true;
+      final isEnabled = node['enabled'] == true;
 
+      // 优化：更宽松的节点过滤条件
       String label;
       if (text.isNotEmpty && desc.isNotEmpty && text != desc) {
         label = '$text $desc';
@@ -1382,7 +1771,27 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
         label = text.isNotEmpty ? text : desc;
       }
 
+      // 极低过滤条件：几乎包含所有有效节点，但优化文字显示
+      bool shouldInclude = false;
+      
       if (label.isNotEmpty) {
+        // 有文本标签的节点 - 保持原文字
+        shouldInclude = true;
+      } else if (isEditable) {
+        // 任何可编辑控件 - 用简洁符号
+        label = '';
+        shouldInclude = true;
+      } else if (isClickable) {
+        // 任何可点击控件 - 用简洁符号
+        label = '';
+        shouldInclude = true;
+      } else if (bounds.width > 0 && bounds.height > 0) {
+        // 任何有有效尺寸的控件都包含，但不显示文字避免遮挡
+        label = ''; // 不显示文字，只显示边框
+        shouldInclude = true;
+      }
+
+      if (shouldInclude && bounds.width > 0 && bounds.height > 0) {
         list.add(_AccessibilityNode(bounds: bounds, label: label));
       }
     }
@@ -1453,7 +1862,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
 
   ///开/关电话拦截
   void _toggleIntercept(bool interceptOn) async {
-    if (Platform.isAndroid) {
+    if (!kIsWeb && Platform.isAndroid) {
       if (interceptOn) {
         final ok = await PhoneUtils.interceptCall(true);
         if (ok) {
@@ -1526,7 +1935,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
 
       if (_channel == "cf") {
         Map<String, dynamic> frameRate;
-        if (Platform.isIOS) {
+        if (!kIsWeb && Platform.isIOS) {
           // iOS 设备，最大帧率 30，最小帧率 15
           frameRate = {'ideal': 60, 'max': 90};
         } else {
@@ -1590,7 +1999,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
         try {
           final offer = await _pc!.createOffer();
           // 仅在 iOS 平台上修改 SDP
-          if (Platform.isIOS) {
+          if (!kIsWeb && Platform.isIOS) {
             await _pc!.setLocalDescription(_fixSdp(offer));
           } else {
             await _pc!.setLocalDescription(offer);
@@ -1687,6 +2096,14 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
   @override
   void dispose() {
     print('📴 清理资源');
+    
+    // Web平台：移除页面刷新监听器
+    if (kIsWeb && _beforeUnloadListener != null) {
+      html.window.removeEventListener('beforeunload', _beforeUnloadListener!);
+      _beforeUnloadListener = null;
+      print('🌐 已移除Web页面刷新监听器');
+    }
+    
     _nodeTreeTimer?.cancel(); // → 增：取消节点树定时器
     _durationTimer?.cancel(); // → 增：取消计时器
     // 1. 恢复来电拦截，停止前台服务
@@ -1766,7 +2183,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
           track.enabled = enabled;
         }
       } else {
-        if (Platform.isAndroid) {
+        if (!kIsWeb && Platform.isAndroid) {
           for (var track in _localStream!.getAudioTracks()) {
             track.enabled = enabled;
           }
@@ -1917,9 +2334,10 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
   void _changeShowNodeTree() async {
     _showNodeRects = !_showNodeRects;
 
-    await EasyLoading.showToast(_showNodeRects ? '已开启页面读取' : '已关闭页面读取');
-
     if (_showNodeRects) {
+      // 显示优化改进提示
+      await EasyLoading.showToast('已开启页面读取（已优化，显示更多控件）');
+      
       // 检查是否有保存的分辨率信息
       if (_savedRemoteScreenWidth <= 0 || _savedRemoteScreenHeight <= 0) {
         await EasyLoading.showToast('请先开启屏幕共享以获取分辨率信息');
@@ -1930,9 +2348,14 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
       
       // 开启定时发送 - 即使没有视频流也可以发送命令
       if (_signaling != null) {
+        print('📱 开始发送页面读取请求...');
         _signaling!.sendCommand({'type': 'show_view'});
         _nodeTreeTimer?.cancel(); // 防止重复开启
-        _nodeTreeTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        // 根据节点数量动态调整更新频率
+        final updateInterval = _nodeRects.length > 500 
+            ? const Duration(seconds: 3) // 节点多时降低频率
+            : const Duration(seconds: 2); // 节点少时正常频率
+        _nodeTreeTimer = Timer.periodic(updateInterval, (_) {
           _signaling?.sendCommand({'type': 'show_view'});
         });
       } else {
@@ -1941,10 +2364,12 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
         _showNodeRects = false;
       }
     } else {
+      await EasyLoading.showToast('已关闭页面读取');
       // 停止发送并清除节点
       _nodeTreeTimer?.cancel();
       _nodeTreeTimer = null;
       _nodeRects.clear();
+      print('📱 已停止页面读取');
     }
 
     setState(() {});
@@ -2259,29 +2684,17 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
                         ? const Text('正在语音通话中..',
                         style: TextStyle(
                             color: Colors.black, fontSize: 24))
-                        : GestureDetector(
+                        : Listener(
                       key: _videoKey,
                       behavior: HitTestBehavior.translucent,
-                      onPanStart: (details) {
-                        _lastPanPosition = details.globalPosition;
-                        _onTouch(details.globalPosition, 'swipStart');
+                      onPointerDown: (event) {
+                        _onPointerDown(event.position);
                       },
-                      onPanUpdate: (details) {
-                        _lastPanPosition = details.globalPosition;
-                        _onTouch(details.globalPosition, 'swipMove');
+                      onPointerMove: (event) {
+                        _onPointerMove(event.position);
                       },
-                      onPanEnd: (details) {
-                        if (_lastPanPosition != null) {
-                          _onTouch(_lastPanPosition!, 'swipEnd');
-                        }
-                      },
-                      onTapDown: (details) {
-                        _lastTapPosition = details.globalPosition;
-                      },
-                      onTap: () {
-                        if (_lastTapPosition != null) {
-                          _onTouch(_lastTapPosition!, 'tap');
-                        }
+                      onPointerUp: (event) {
+                        _onPointerUp(event.position);
                       },
                       child: AspectRatio(
                         aspectRatio: _remoteScreenWidth /
@@ -2311,29 +2724,16 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
                                   // 远控开启时，添加透明的点击层
                                   if (_remoteOn && widget.isCaller)
                                     Positioned.fill(
-                                      child: GestureDetector(
-                                        key: _videoKey,
+                                      child: Listener(
                                         behavior: HitTestBehavior.translucent,
-                                        onPanStart: (details) {
-                                          _lastPanPosition = details.globalPosition;
-                                          _onTouch(details.globalPosition, 'swipStart');
+                                        onPointerDown: (event) {
+                                          _onPointerDown(event.position);
                                         },
-                                        onPanUpdate: (details) {
-                                          _lastPanPosition = details.globalPosition;
-                                          _onTouch(details.globalPosition, 'swipMove');
+                                        onPointerMove: (event) {
+                                          _onPointerMove(event.position);
                                         },
-                                        onPanEnd: (details) {
-                                          if (_lastPanPosition != null) {
-                                            _onTouch(_lastPanPosition!, 'swipEnd');
-                                          }
-                                        },
-                                        onTapDown: (details) {
-                                          _lastTapPosition = details.globalPosition;
-                                        },
-                                        onTap: () {
-                                          if (_lastTapPosition != null) {
-                                            _onTouch(_lastTapPosition!, 'tap');
-                                          }
+                                        onPointerUp: (event) {
+                                          _onPointerUp(event.position);
                                         },
                                         child: Container(
                                           color: Colors.transparent,
@@ -2349,8 +2749,9 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
                                           painter: _AccessibilityPainter(
                                             _nodeRects.where((node) {
                                               final rect = node.bounds;
-                                              return rect.width > 0 &&
-                                                  rect.height > 0 &&
+                                              // 极宽松：显示几乎所有节点（语音通话时）
+                                              return rect.width >= 1 && // 最小宽度1像素
+                                                  rect.height >= 1 && // 最小高度1像素
                                                   !rect.isEmpty &&
                                                   rect.left.isFinite &&
                                                   rect.top.isFinite &&
@@ -2379,35 +2780,17 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
                       builder: (context, constraints) {
                         return Stack(
                           children: [
-                            GestureDetector(
+                            Listener(
                               behavior:
                               HitTestBehavior.translucent,
-                              onPanStart: (details) {
-                                _lastPanPosition =
-                                    details.globalPosition;
-                                _onTouch(details.globalPosition,
-                                    'swipStart');
+                              onPointerDown: (event) {
+                                _onPointerDown(event.position);
                               },
-                              onPanUpdate: (details) {
-                                _lastPanPosition =
-                                    details.globalPosition;
-                                _onTouch(details.globalPosition,
-                                    'swipMove');
+                              onPointerMove: (event) {
+                                _onPointerMove(event.position);
                               },
-                              onPanEnd: (details) {
-                                if (_lastPanPosition != null) {
-                                  _onTouch(_lastPanPosition!,
-                                      'swipEnd');
-                                }
-                              },
-                              onTapDown: (details) {
-                                _lastTapPosition =
-                                    details.globalPosition;
-                              },
-                              onTap: () {
-                                if (_lastTapPosition != null) {
-                                  _onTouch(_lastTapPosition!, 'tap');
-                                }
+                              onPointerUp: (event) {
+                                _onPointerUp(event.position);
                               },
                               child: RTCVideoView(
                                 _remoteRenderer,
@@ -2428,8 +2811,9 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
                                           painter: _AccessibilityPainter(
                                             _nodeRects.where((node) {
                                               final rect = node.bounds;
-                                              return rect.width > 0 &&
-                                                  rect.height > 0 &&
+                                              // 极宽松：显示几乎所有节点（视频通话时）
+                                              return rect.width >= 1 && // 最小宽度1像素
+                                                  rect.height >= 1 && // 最小高度1像素
                                                   !rect.isEmpty &&
                                                   rect.left.isFinite &&
                                                   rect.top.isFinite &&
@@ -2661,43 +3045,46 @@ class _AccessibilityPainter extends CustomPainter {
 
       canvas.drawRect(scaled, paint);
 
-      // 初始字体大小
-      double fontSize = 12;
-      TextPainter tp;
-      do {
-        tp = TextPainter(
-          text: TextSpan(
-            text: node.label,
-            style: TextStyle(color: Colors.red, fontSize: fontSize),
-          ),
-          textDirection: TextDirection.ltr,
-          textAlign: TextAlign.center,
-          maxLines: null,
-        );
-        tp.layout(maxWidth: scaled.width);
-        fontSize -= 0.5;
-      } while ((tp.height > scaled.height || tp.width > scaled.width) && fontSize > 6);
+      // 只有非空标签才绘制文字
+      if (node.label.isNotEmpty) {
+        // 初始字体大小
+        double fontSize = 12;
+        TextPainter tp;
+        do {
+          tp = TextPainter(
+            text: TextSpan(
+              text: node.label,
+              style: TextStyle(color: Colors.red, fontSize: fontSize),
+            ),
+            textDirection: TextDirection.ltr,
+            textAlign: TextAlign.center,
+            maxLines: null,
+          );
+          tp.layout(maxWidth: scaled.width);
+          fontSize -= 0.5;
+        } while ((tp.height > scaled.height || tp.width > scaled.width) && fontSize > 6);
 
-      // fallback：如果太小仍然超出，最多一行+省略号
-      if (tp.height > scaled.height || tp.width > scaled.width) {
-        tp = TextPainter(
-          text: TextSpan(
-            text: node.label,
-            style: const TextStyle(color: Colors.red, fontSize: 6),
-          ),
-          textDirection: TextDirection.ltr,
-          textAlign: TextAlign.center,
-          maxLines: 1,
-          ellipsis: '…',
+        // fallback：如果太小仍然超出，最多一行+省略号
+        if (tp.height > scaled.height || tp.width > scaled.width) {
+          tp = TextPainter(
+            text: TextSpan(
+              text: node.label,
+              style: const TextStyle(color: Colors.red, fontSize: 6),
+            ),
+            textDirection: TextDirection.ltr,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            ellipsis: '…',
+          );
+          tp.layout(maxWidth: scaled.width);
+        }
+
+        final offset = Offset(
+          scaled.left + (scaled.width - tp.width) / 2,
+          scaled.top + (scaled.height - tp.height) / 2,
         );
-        tp.layout(maxWidth: scaled.width);
+        tp.paint(canvas, offset);
       }
-
-      final offset = Offset(
-        scaled.left + (scaled.width - tp.width) / 2,
-        scaled.top + (scaled.height - tp.height) / 2,
-      );
-      tp.paint(canvas, offset);
     }
   }
 
