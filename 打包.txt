@@ -1,4 +1,11 @@
 flutter build ios --release --no-codesign
 
-
 Payload
+
+
+./clean-build.sh debug 
+
+./clean-build.sh release
+
+
+flutter run -d web-server --web-port 3000

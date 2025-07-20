@@ -181,7 +181,7 @@ deploy_to_cloudflare() {
     
     # 部署
     print_deploy "正在部署到Cloudflare Pages..."
-    wrangler pages deploy build/web --project-name yunzhutong-web
+    wrangler pages deploy build/web --project-name yunzhutong-web --commit-dirty=true
     
     if [ $? -eq 0 ]; then
         print_success "部署成功！"

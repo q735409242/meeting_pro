@@ -5,8 +5,7 @@ import 'dart:convert';
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 
-// Web平台条件导入
-import 'dart:html' as html if (dart.library.html) 'dart:html';
+// Web平台条件导入已移除 - 暂时禁用Web特定功能
 
 // import 'dart:math' as math;
 // import 'package:permission_handler/permission_handler.dart';
@@ -179,8 +178,8 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
   double? _savedVideoOffsetY;
   bool _hasValidVideoContainerInfo = false; // 标记是否有有效的容器信息
 
-  // Web平台页面刷新监听器
-  html.EventListener? _beforeUnloadListener;
+  // Web平台页面刷新监听器 - 使用dynamic避免编译时类型检查
+  dynamic _beforeUnloadListener;
 
   @override
   void initState() {
@@ -247,7 +246,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
         
         // 设置确认消息 - 这会显示浏览器原生确认对话框
         final confirmMessage = '确定刷新页面?刷新页面后将退出房间';
-        (event as html.BeforeUnloadEvent).returnValue = confirmMessage;
+        (event as dynamic).returnValue = confirmMessage;
         
         // 异步执行退出房间逻辑（不阻塞页面关闭）
         _handlePageUnload();
@@ -256,8 +255,11 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
         return confirmMessage;
       };
       
-      // 添加监听器
-      html.window.addEventListener('beforeunload', _beforeUnloadListener!);
+      // 添加监听器 - 暂时禁用避免编译问题
+      // TODO: 重新实现Web页面刷新监听
+      if (kIsWeb) {
+        print('Web页面刷新监听暂时禁用');
+      }
       print('🌐 Web页面刷新确认已设置');
     }
   }
@@ -2097,9 +2099,10 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
   void dispose() {
     print('📴 清理资源');
     
-    // Web平台：移除页面刷新监听器
+    // Web平台：移除页面刷新监听器 - 暂时禁用
     if (kIsWeb && _beforeUnloadListener != null) {
-      html.window.removeEventListener('beforeunload', _beforeUnloadListener!);
+      // TODO: 重新实现removeEventListener
+      print('移除Web页面刷新监听器 - 暂时禁用');
       _beforeUnloadListener = null;
       print('🌐 已移除Web页面刷新监听器');
     }

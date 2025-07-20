@@ -10,56 +10,19 @@
     "prefer_related_applications": false,
     "categories": ["business", "productivity", "communication"],
     "lang": "zh-CN",
-    "icons": [
-        {
-            "src": "icons/Icon-192.png",
-            "sizes": "192x192",
-            "type": "image/png",
-            "purpose": "maskable any"
-        },
-        {
-            "src": "icons/Icon-512.png",
-            "sizes": "512x512",
-            "type": "image/png",
-            "purpose": "maskable any"
-        },
-        {
-            "src": "icons/Icon-maskable-192.png",
-            "sizes": "192x192",
-            "type": "image/png",
-            "purpose": "maskable"
-        },
-        {
-            "src": "icons/Icon-maskable-512.png",
-            "sizes": "512x512",
-            "type": "image/png",
-            "purpose": "maskable"
-        }
-    ],
+    "icons": [],
     "shortcuts": [
         {
             "name": "创建新会议",
             "short_name": "创建会议",
             "description": "快速创建新的会议房间",
-            "url": "/#create",
-            "icons": [
-                {
-                    "src": "icons/Icon-192.png",
-                    "sizes": "192x192"
-                }
-            ]
+            "url": "/#create"
         },
         {
             "name": "加入会议",
             "short_name": "加入会议",
             "description": "通过房间号加入现有会议",
-            "url": "/#join",
-            "icons": [
-                {
-                    "src": "icons/Icon-192.png",
-                    "sizes": "192x192"
-                }
-            ]
+            "url": "/#join"
         }
     ],
     "related_applications": [],
