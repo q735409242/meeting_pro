@@ -19,7 +19,7 @@
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="云助通Web主控端 - 在线会议管理平台，支持创建、管理和监控音视频会议">
+  <meta name="description" content="云助通Web - 在线会议">
 
   <!-- 性能优化 -->
   <meta name="robots" content="index, follow">
@@ -34,6 +34,9 @@
   <link rel="preload" href="styles.css" as="style">
   
   <!-- 移除WASM预加载 - 在开发环境下会导致404错误 -->
+  
+  <!-- 控制台静默脚本 - 最优先加载 -->
+  <script src="console-silence.js"></script>
   
   <!-- 引入性能优化样式 -->
   <link rel="stylesheet" href="styles.css">
@@ -120,7 +123,7 @@
   <link rel="icon" type="image/png" href="favicon.png"/>
 
   <!-- 页面标题 -->
-  <title>云助通 - Web主控端</title>
+  <title>云助通 - Web</title>
   <link rel="manifest" href="manifest.json">
   
   <!-- PWA主题色 -->
@@ -132,7 +135,7 @@
   <div id="loading">
     <div>
       <div class="loading-spinner"></div>
-      <div class="loading-text">云助通加载中...</div>
+      <div class="loading-text">加载中...</div>
     </div>
   </div>
 
@@ -151,7 +154,7 @@
           loading.style.display = 'none';
         }, 300);
       }
-      console.log('✅ Flutter应用加载完成');
+              // Flutter应用加载完成（生产环境静默）
     });
     
     // 加载超时检查（15秒后）
@@ -188,14 +191,14 @@
         window.addEventListener('load', function() {
           navigator.serviceWorker.register('/sw.js')
             .then(function(registration) {
-              console.log('Service Worker注册成功:', registration.scope);
+              // 生产环境静默
             })
             .catch(function(error) {
-              console.log('Service Worker注册失败:', error);
+              // 生产环境静默
             });
         });
       } else {
-        console.log('开发环境：跳过Service Worker注册');
+        // 开发环境：跳过Service Worker注册
       }
     }
     

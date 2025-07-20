@@ -660,32 +660,32 @@ class _WebHostPageState extends State<WebHostPage> {
 
   /// 构建Web特色功能
   Widget _buildWebFeatures() {
-    return Card(
+    return const Card(
       elevation: 4,
       child: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Row(
+            Row(
               children: [
                 Icon(Icons.public, color: Colors.purple),
                 SizedBox(width: 8),
                 Text('Web版特色', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               ],
             ),
-            const SizedBox(height: 16),
-            const ListTile(
+            SizedBox(height: 16),
+            ListTile(
               leading: Icon(Icons.share, color: Colors.blue),
               title: Text('快速分享'),
               subtitle: Text('生成会议链接，支持Web和移动端用户快速加入'),
             ),
-            const ListTile(
+            ListTile(
               leading: Icon(Icons.devices, color: Colors.green),
               title: Text('跨平台兼容'),
               subtitle: Text('无需安装客户端，支持所有现代浏览器'),
             ),
-            const ListTile(
+            ListTile(
               leading: Icon(Icons.cloud, color: Colors.orange),
               title: Text('云端同步'),
               subtitle: Text('会议数据实时同步，多设备无缝切换'),
@@ -700,7 +700,7 @@ class _WebHostPageState extends State<WebHostPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('云助通 - Web主控端'),
+        title: const Text('云助通 - Web'),
         centerTitle: true,
         backgroundColor: Colors.blueGrey[800],
         foregroundColor: Colors.white,
@@ -715,10 +715,8 @@ class _WebHostPageState extends State<WebHostPage> {
                   content: const Text(
                     '🌐 Web主控端使用说明:\n\n'
                     '1. 绑定注册码激活设备\n'
-                    '2. 创建新会议获取房间号和分享链接\n'
+                    '2. 创建新会议获取房间号\n'
                     '3. 移动端用户使用房间号加入\n'
-                    '4. Web用户可直接点击分享链接加入\n'
-                    '5. 在活跃会议中管理所有进行的会议\n\n'
                     '💡 提示: Web版本无需安装，打开浏览器即可使用！'
                   ),
                   actions: [

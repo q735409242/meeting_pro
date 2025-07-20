@@ -5,14 +5,17 @@
   "main": "src/worker.js",
   "scripts": {
     "build": "flutter build web --release",
+    "build:silent": "./build-silent.sh",
+    "deploy": "./deploy-pages.sh",
+    "deploy:silent": "./deploy-silent.sh",
+    "deploy:quick": "./deploy-silent.sh",
     "dev": "wrangler dev",
-    "deploy": "npm run build && wrangler deploy",
-    "deploy:staging": "npm run build && wrangler deploy --env staging",
-    "deploy:production": "npm run build && wrangler deploy --env production",
     "preview": "wrangler preview",
     "tail": "wrangler tail",
     "clean": "rm -rf build/web",
-    "setup": "npm install -g wrangler && wrangler login"
+    "setup": "npm install -g wrangler && wrangler login",
+    "logs": "wrangler pages deployment tail --project-name yunzhutong-web",
+    "status": "wrangler pages deployment list --project-name yunzhutong-web"
   },
   "keywords": [
     "flutter",

@@ -1,7 +1,7 @@
 {
-    "name": "云助通 - Web主控端",
+    "name": "云助通 - Web",
     "short_name": "云助通主控",
-    "description": "云助通Web主控端 - 在线会议管理平台，支持创建、管理和监控音视频会议",
+    "description": "云助通Web - 在线会议",
     "start_url": "/",
     "display": "standalone",
     "background_color": "#ffffff",

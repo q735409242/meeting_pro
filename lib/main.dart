@@ -5,6 +5,7 @@ import 'pages/home_page.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_easyloading/flutter_easyloading.dart';
 import '../method_channels/wakelock_service.dart';
+import 'utils/logger.dart';
 
 // Web平台条件导入
 import 'dart:html' as html if (dart.library.html) 'dart:html';
@@ -54,7 +55,7 @@ void overlayMain() {
 /// Web平台性能优化初始化
 void _initWebOptimizations() {
   if (kIsWeb) {
-    print('🌐 初始化Web平台基础优化');
+    Logger.network('初始化Web平台基础优化');
     
     try {
       // 延迟执行，确保DOM已加载
@@ -62,9 +63,9 @@ void _initWebOptimizations() {
         _setupWebBasicOptimizations();
       });
       
-      print('✅ Web平台基础优化已启动');
+      Logger.success('Web平台基础优化已启动');
     } catch (e) {
-      print('❌ Web平台优化启动失败: $e');
+      Logger.error('Web平台优化启动失败: $e');
     }
   }
 }
@@ -81,9 +82,9 @@ void _setupWebBasicOptimizations() {
         html.document.body?.style.touchAction = 'manipulation';
       }
       
-      print('🎨 Web基础优化已应用');
+      Logger.success('Web基础优化已应用');
     } catch (e) {
-      print('❌ Web基础优化失败: $e');
+      Logger.error('Web基础优化失败: $e');
       // 不阻止应用启动
     }
   }
