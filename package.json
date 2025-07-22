@@ -1,7 +1,7 @@
 {
   "name": "yunzhutong-web-cloudflare",
   "version": "1.0.0",
-  "description": "云助通Web主控端 - Cloudflare Workers部署",
+  "description": "云协通Web主控端 - Cloudflare Workers部署",
   "main": "src/worker.js",
   "scripts": {
     "build": "flutter build web --release",
@@ -25,7 +25,7 @@
     "meeting",
     "webrtc"
   ],
-  "author": "云助通团队",
+  "author": "云协通团队",
   "license": "MIT",
   "devDependencies": {
     "wrangler": "^3.60.3"

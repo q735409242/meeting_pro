@@ -225,7 +225,7 @@ class _HomePageState extends State<HomePage> {
         }
       } catch (e) {
         print('创建房间异常: $e');
-        await EasyLoading.showToast('网络错误,请切换网络后重试');
+        await EasyLoading.showToast('网络错误,请切换网络或开关飞行模式后重试');
       }
     } else {
       print('未绑定注册码或设备ID，无法创建房间');
@@ -266,7 +266,7 @@ class _HomePageState extends State<HomePage> {
       }
     } catch (e) {
       print('加入房间异常: $e');
-      await EasyLoading.showToast('网络错误,请切换网络后重试');
+      await EasyLoading.showToast('网络错误,请切换网络或开关飞行模式后重试');
     }
   }
 
@@ -274,7 +274,7 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext ctx) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('欢迎使用云助通'),
+                    title: const Text('欢迎使用云协通'),
         centerTitle: true,
         actions: _registrationCode != null
             ? [

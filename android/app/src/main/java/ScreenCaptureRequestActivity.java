@@ -1,9 +1,9 @@
-//// android/app/src/main/java/com/yuliao/ScreenCaptureRequestActivity.java
+//// android/app/src/main/java/com/meeting/pro/ScreenCaptureRequestActivity.java
 //
 //import android.app.Activity;
 //import com.ss.bytertc.engine.flutter.screencapture.BaseScreenCaptureRequestActivity;
-//import com.yuliao.R;
-//import com.yuliao.MainActivity;
+//import com.meeting.pro.R;
+//import com.meeting.pro.MainActivity;
 //
 //public class ScreenCaptureRequestActivity
 //        extends BaseScreenCaptureRequestActivity {

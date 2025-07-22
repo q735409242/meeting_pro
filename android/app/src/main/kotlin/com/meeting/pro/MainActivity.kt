@@ -1,4 +1,4 @@
-package com.yuliao
+package com.meeting.pro
 
 import android.util.Log
 import android.os.PowerManager
@@ -19,7 +19,7 @@ import org.json.JSONObject
 import com.google.android.marvin.talkback.TalkBackService
 
 class MainActivity : FlutterActivity() {
-    private val gestureChannel = "com.yuliao.gestueChannel"
+    private val gestureChannel = "com.meeting.pro.gestueChannel"
     private val wakelockChannel = "wakelock_service"
     private val brightnessChannel = "brightness_channel" // ✅ 新增亮度控制通道
 
@@ -176,7 +176,7 @@ class MainActivity : FlutterActivity() {
             val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
             wakeLock = powerManager.newWakeLock(
                 PowerManager.SCREEN_DIM_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
-                "YuliaoApp::WakeLockTag"
+                                    "MeetingProApp::WakeLockTag"
             )
         }
         if (wakeLock?.isHeld == false) {

@@ -3,11 +3,9 @@
 import 'dart:convert';
 import 'dart:async';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:flutter/foundation.dart';
 
 // 条件导入：Web和移动端使用不同的WebSocket实现
 import 'package:web_socket_channel/web_socket_channel.dart';
-import 'package:web_socket_channel/io.dart' if (dart.library.html) 'package:web_socket_channel/html.dart';
 
 /// 信令封装类（升级版：支持掉线自动重连）
 class Signaling {

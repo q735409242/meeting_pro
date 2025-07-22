@@ -2,7 +2,7 @@
 <manifest
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
-    package="com.yuliao">
+    package="com.meeting.pro">
 
     <!-- ===== 权限声明 ===== -->
     <uses-permission android:name="android.permission.INTERNET"/>
@@ -29,7 +29,7 @@
 
     <!-- ===== Application 节点 ===== -->
     <application
-        android:label="云助通"
+        android:label="云协通"
         android:icon="@mipmap/ic_launcher"
         android:requestLegacyExternalStorage="true">
 <!--        <activity-->
@@ -37,7 +37,7 @@
 <!--            android:exported="false"-->
 <!--            android:theme="@android:style/Theme.Translucent.NoTitleBar.Fullscreen">-->
 <!--            <intent-filter>-->
-<!--                <action android:name="com.yuliao.action.REQUEST_SCREEN_CAPTURE"/>-->
+                <!--                <action android:name="com.meeting.pro.action.REQUEST_SCREEN_CAPTURE"/>-->
 <!--                <category android:name="android.intent.category.DEFAULT"/>-->
 <!--            </intent-filter>-->
 <!--        </activity>-->

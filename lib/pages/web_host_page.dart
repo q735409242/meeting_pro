@@ -700,7 +700,7 @@ class _WebHostPageState extends State<WebHostPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('云助通 - Web'),
+        title: const Text('云协通 - Web'),
         centerTitle: true,
         backgroundColor: Colors.blueGrey[800],
         foregroundColor: Colors.white,

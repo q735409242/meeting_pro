@@ -1,7 +1,7 @@
 {
-    "name": "云助通 - Web",
-    "short_name": "云助通主控",
-    "description": "云助通Web - 在线会议",
+      "name": "云协通 - Web",
+  "short_name": "云协通主控",
+  "description": "云协通Web - 在线会议",
     "start_url": "/",
     "display": "standalone",
     "background_color": "#ffffff",

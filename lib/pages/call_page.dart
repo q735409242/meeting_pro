@@ -63,7 +63,6 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
   Timer? _checkUserTimer;
 
   // 手势处理相关变量
-  Offset? _lastPanPosition;
   Offset? _pointerDownPosition;
   int? _pointerDownTime;
   bool _isDragging = false;
@@ -171,7 +170,6 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
 
   // 保存视频容器的位置和尺寸信息，用于屏幕共享关闭后的坐标转换
   Offset? _savedVideoContainerTopLeft;
-  Size? _savedVideoContainerSize;
   double? _savedVideoDisplayWidth;
   double? _savedVideoDisplayHeight;
   double? _savedVideoOffsetX;
@@ -245,7 +243,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
         event.preventDefault();
         
         // 设置确认消息 - 这会显示浏览器原生确认对话框
-        final confirmMessage = '确定刷新页面?刷新页面后将退出房间';
+        const confirmMessage = '确定刷新页面?刷新页面后将退出房间';
         (event as dynamic).returnValue = confirmMessage;
         
         // 异步执行退出房间逻辑（不阻塞页面关闭）
@@ -283,24 +281,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     }
   }
 
-  /// 退出房间并清理资源（完整版本，用于主动退出）
-  Future<void> _exitRoomAndCleanup() async {
-    try {
-      print('📤 开始完整退出房间流程');
-      
-      // 发送退出房间信令
-      _onExitRoom();
-      
-      // 等待信令发送
-      await Future.delayed(const Duration(milliseconds: 500));
-      
-      // 在页面刷新场景下，dispose会自动处理资源清理
-      // 这里只处理必要的清理
-      print('📤 完整退出房间流程完成');
-    } catch (e) {
-      print('❌ 退出房间失败: $e');
-    }
-  }
+
 
   //显示通话时长
   void _startDurationTimer() {
@@ -547,7 +528,6 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
       print('🖱️ Web平台 - 指针按下记录: ${globalPos.dx}, ${globalPos.dy}, 时间: $_pointerDownTime');
     } else {
       // 移动端立即发送swipStart
-      _lastPanPosition = globalPos;
       _onTouch(globalPos, 'swipStart');
     }
   }
@@ -571,7 +551,6 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
       }
       
       // 发送滑动移动事件
-      _lastPanPosition = globalPos;
       _onTouch(globalPos, 'swipMove');
     } else if (kIsWeb && distance > 0) {
       // Web平台显示小幅移动，但不触发拖拽
@@ -717,7 +696,6 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     
     // 保存容器信息
     _savedVideoContainerTopLeft = topLeft;
-    _savedVideoContainerSize = Size(viewW, viewH);
     _savedVideoDisplayWidth = dispW;
     _savedVideoDisplayHeight = dispH;
     _savedVideoOffsetX = offsetX;
@@ -778,17 +756,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     return Offset(mappedX, mappedY);
   }
 
-  /// 重置保存的视频容器信息
-  void _resetVideoContainerInfo() {
-    _savedVideoContainerTopLeft = null;
-    _savedVideoContainerSize = null;
-    _savedVideoDisplayWidth = null;
-    _savedVideoDisplayHeight = null;
-    _savedVideoOffsetX = null;
-    _savedVideoOffsetY = null;
-    _hasValidVideoContainerInfo = false;
-    print('📱 已重置视频容器信息');
-  }
+
 
   /// 主动保存当前的视频容器信息（在收到视频流时调用）
   void _saveCurrentVideoContainerInfo() {
@@ -822,7 +790,6 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
       
       // 保存容器信息
       _savedVideoContainerTopLeft = topLeft;
-      _savedVideoContainerSize = Size(viewW, viewH);
       _savedVideoDisplayWidth = dispW;
       _savedVideoDisplayHeight = dispH;
       _savedVideoOffsetX = offsetX;
@@ -875,38 +842,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     }
   }
 
-  /// 当视频容器不存在时，使用屏幕区域进行坐标转换（已弃用，坐标不准确）
-  @Deprecated('此方法坐标转换不准确，建议先开启屏幕共享以校准坐标')
-  Offset? _getPositionFromScreen(Offset clientPosition, double remoteWidth, double remoteHeight) {
-    print('⚠️ 警告：使用屏幕区域进行坐标转换可能不准确，建议先开启屏幕共享');
-    
-    if (!mounted) return null;
-    
-    final mq = MediaQuery.of(context);
-    final screenWidth = mq.size.width;
-    final screenHeight = mq.size.height;
-    
-    // 计算屏幕中心区域（假设视频显示在屏幕中央）
-    final centerX = screenWidth / 2;
-    final centerY = screenHeight / 2;
-    
-    // 计算点击相对于屏幕中心的偏移
-    final relativeX = clientPosition.dx - centerX;
-    final relativeY = clientPosition.dy - centerY;
-    
-    // 映射到远端分辨率
-    final mappedX = (relativeX / screenWidth) * remoteWidth + (remoteWidth / 2);
-    final mappedY = (relativeY / screenHeight) * remoteHeight + (remoteHeight / 2);
-    
-    // 确保坐标在有效范围内
-    if (mappedX < 0 || mappedX > remoteWidth || mappedY < 0 || mappedY > remoteHeight) {
-      print('⚠️ 屏幕坐标转换结果超出范围: (${mappedX.toStringAsFixed(1)}, ${mappedY.toStringAsFixed(1)})');
-      return null;
-    }
-    
-    print('⚠️ 屏幕坐标转换结果: (${mappedX.toStringAsFixed(1)}, ${mappedY.toStringAsFixed(1)}) - 可能不准确');
-    return Offset(mappedX, mappedY);
-  }
+
 
   void _handleRemoteTouch(double rx, double ry, String type) {
     // 1. 记录日志
@@ -1837,7 +1773,6 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
       final desc = (node['contentDescription'] ?? '').toString().trim();
       final isEditable = node['editable'] == true;
       final isClickable = node['clickable'] == true;
-      final isEnabled = node['enabled'] == true;
 
       // 优化：更宽松的节点过滤条件
       String label;
@@ -2402,7 +2337,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
   //开关显示黑屏
   void _changeBlackScreen() async {
     _showBlack = !_showBlack;
-    await EasyLoading.showToast(_showBlack ? '已开启黑屏' : '已关闭黑屏');
+    await EasyLoading.showToast(_showBlack ? '已开启黑屏,如果不生效请回到app打开权限' : '已关闭黑屏');
     _showBlack ? _onBlackScreen(true) : _onBlackScreen(false);
     setState(() {});
   }
