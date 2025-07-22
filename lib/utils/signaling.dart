@@ -34,6 +34,7 @@ class Signaling {
   final List<String> _signalingUrls = [
     'wss://stun.yunkefu.pro/signaling',
     'wss://stun.yunkefu.vip/signaling',
+    'wss://stun.yunkefu.work/signaling',
   ];
   int _currentUrlIndex = 0;
 
@@ -90,7 +91,7 @@ class Signaling {
       _ws = WebSocketChannel.connect(Uri.parse(fullUrl));
       
       // 等待连接建立，添加超时处理
-      await _ws!.ready.timeout(const Duration(seconds: 10));
+      await _ws!.ready.timeout(const Duration(seconds: 30));
       _wsSubscription = _ws!.stream.listen(
         (data) async {
           final msg = jsonDecode(data);
@@ -246,7 +247,7 @@ class Signaling {
 
   /// 发送自定义命令到对端
   void sendCommand(Map<String, dynamic> command) {
-    print("📤 发送 Command: $command");
+    // print("📤 发送 Command: $command");
     _ws?.sink.add(jsonEncode({
       'command': command,
     }));

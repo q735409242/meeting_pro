@@ -693,7 +693,11 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
       return _calculatePositionFromSaved(clientPosition, effectiveWidth, effectiveHeight);
     } else {
       // 没有任何容器信息，提示用户
-      print('⚠️ 没有有效的视频容器信息，请先开启屏幕共享以校准坐标转换');
+      if (effectiveWidth > 0 && effectiveHeight > 0) {
+        print('⚠️ 没有有效的视频容器信息，请先开启屏幕共享并等待画面显示后再操作');
+      } else {
+        print('⚠️ 远端分辨率未知，请先开启屏幕共享以校准坐标转换');
+      }
       return null;
     }
   }
@@ -784,6 +788,54 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     _savedVideoOffsetY = null;
     _hasValidVideoContainerInfo = false;
     print('📱 已重置视频容器信息');
+  }
+
+  /// 主动保存当前的视频容器信息（在收到视频流时调用）
+  void _saveCurrentVideoContainerInfo() {
+    // 确保有有效的分辨率信息
+    final effectiveWidth = _savedRemoteScreenWidth > 0 ? _savedRemoteScreenWidth : _remoteScreenWidth;
+    final effectiveHeight = _savedRemoteScreenHeight > 0 ? _savedRemoteScreenHeight : _remoteScreenHeight;
+    
+    if (effectiveWidth <= 0 || effectiveHeight <= 0) {
+      print('📱 分辨率信息不完整，无法保存容器信息');
+      return;
+    }
+    
+    // 获取视频容器
+    final box = _videoKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) {
+      print('📱 视频容器不存在，无法保存容器信息');
+      return;
+    }
+    
+    try {
+      final topLeft = box.localToGlobal(Offset.zero);
+      final viewW = box.size.width;
+      final viewH = box.size.height;
+      
+      // contain 模式下视频展示尺寸与偏移
+      final scale = min(viewW / effectiveWidth, viewH / effectiveHeight);
+      final dispW = effectiveWidth * scale;
+      final dispH = effectiveHeight * scale;
+      final offsetX = (viewW - dispW) / 2;
+      final offsetY = (viewH - dispH) / 2;
+      
+      // 保存容器信息
+      _savedVideoContainerTopLeft = topLeft;
+      _savedVideoContainerSize = Size(viewW, viewH);
+      _savedVideoDisplayWidth = dispW;
+      _savedVideoDisplayHeight = dispH;
+      _savedVideoOffsetX = offsetX;
+      _savedVideoOffsetY = offsetY;
+      _hasValidVideoContainerInfo = true;
+      
+      print('📱 主动保存容器信息成功: 位置=${topLeft.dx.toStringAsFixed(1)},${topLeft.dy.toStringAsFixed(1)}, '
+            '容器=${viewW.toStringAsFixed(1)}x${viewH.toStringAsFixed(1)}, '
+            '显示=${dispW.toStringAsFixed(1)}x${dispH.toStringAsFixed(1)}, '
+            '偏移=${offsetX.toStringAsFixed(1)},${offsetY.toStringAsFixed(1)}');
+    } catch (e) {
+      print('📱 保存容器信息失败: $e');
+    }
   }
 
   /// 优化节点树显示性能统计
@@ -1431,6 +1483,13 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
           print('远端开始推送视频');
           _remoteHasVideo = hasVideo;
         });
+        
+        // 如果收到视频流，延迟一下主动保存容器信息
+        if (hasVideo) {
+          Future.delayed(const Duration(milliseconds: 500), () {
+            _saveCurrentVideoContainerInfo();
+          });
+        }
       };
       _pc!.onIceCandidate = (cand) {
         print('📡 本地 ICE Candidate');
@@ -1454,6 +1513,13 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
                 _savedRemoteScreenHeight = _remoteScreenHeight;
                 print('📏 保存屏幕分辨率: ${_savedRemoteScreenWidth}x$_savedRemoteScreenHeight');
               });
+              
+              // 分辨率信息更新后，如果有视频流，主动保存容器信息
+              if (_remoteHasVideo) {
+                Future.delayed(const Duration(milliseconds: 100), () {
+                  _saveCurrentVideoContainerInfo();
+                });
+              }
             } else if (!widget.isCaller && cmd['type'] == 'refresh_screen') {
               print('📺 收到刷新屏幕请求');
               if (_screenStream != null) {
@@ -1741,8 +1807,16 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
       } else {
         print('⏳ 创建者等待远端 Offer');
       }
-      // WebRTC模式下，确保收到第一帧时UI会刷新
-      _remoteRenderer.onResize = () => setState(() {});
+      // WebRTC模式下，确保收到第一帧时UI会刷新，并保存容器信息
+      _remoteRenderer.onResize = () {
+        setState(() {});
+        // 视频尺寸变化时，延迟保存容器信息
+        if (_remoteHasVideo) {
+          Future.delayed(const Duration(milliseconds: 200), () {
+            _saveCurrentVideoContainerInfo();
+          });
+        }
+      };
     }
     // if (_channel == 'sdk') {
     //   if (!_isrefresh) {
