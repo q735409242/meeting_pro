@@ -79,76 +79,30 @@ class Signaling {
 
   /// 建立 WebSocket 连接并开始监听
   Future<void> connect() async {
-    if (_isConnecting) return;
+    if (_isConnecting) {
+      print('🔄 正在连接中，跳过重复连接请求');
+      return;
+    }
     _isConnecting = true;
 
-    // print("🔌 信令连接中: $roomId");
     final urlBase = _signalingUrls[_currentUrlIndex];
     final fullUrl = '$urlBase?room=$roomId';
     print("🔌 信令连接中 (尝试地址 #$_currentUrlIndex): $fullUrl");
+    
     try {
+      // 先清理之前的连接
+      await _cleanupConnection();
+      
       // 使用统一的WebSocketChannel.connect()，支持Web和移动端
       _ws = WebSocketChannel.connect(Uri.parse(fullUrl));
       
       // 等待连接建立，添加超时处理
-      await _ws!.ready.timeout(const Duration(seconds: 30));
+      await _ws!.ready.timeout(const Duration(seconds: 10));
+      
       _wsSubscription = _ws!.stream.listen(
-        (data) async {
-          final msg = jsonDecode(data);
-
-          if (msg['type'] == 'pong') {
-            _lastPongTime = DateTime.now();
-            return;
-          } else if (msg['type'] == 'ping') {
-            _ws?.sink.add(jsonEncode({'type': 'pong'}));
-            return;
-          }
-
-          if (msg['sdp'] != null) {
-            print("📩 收到 SDP: ${msg['sdp']['type']}");
-            final desc = RTCSessionDescription(msg['sdp']['sdp'], msg['sdp']['type']);
-            onRemoteSDP(desc);
-          } else if (msg['candidate'] != null) {
-            print("📩 收到 Candidate");
-            final candidate = RTCIceCandidate(
-              msg['candidate']['candidate'],
-              msg['candidate']['sdpMid'],
-              msg['candidate']['sdpMLineIndex'],
-            );
-            onRemoteCandidate(candidate);
-          } else if (msg['command'] != null) {
-            // print("📩 收到命令: ${msg['command']}");
-            final command = msg['command'];
-            onRemoteCommand?.call(command);
-          } else {
-            print("📩 收到未知消息: $msg");
-          }
-        },
-        onDone: () {
-          print('⚡️ 信令连接 onDone，尝试切换备用地址');
-          if (_currentUrlIndex + 1 < _signalingUrls.length) {
-            _currentUrlIndex++;
-            print("🔁 onDone 切换到备用地址 #$_currentUrlIndex 并重连");
-            connect();
-          } else {
-            print("🚫 onDone 已是最后一个地址，调用 _handleDisconnect");
-            _currentUrlIndex = 0;
-            _handleDisconnect();
-          }
-        },
-        onError: (error) {
-          print('❌ 信令连接出错 (地址 #$_currentUrlIndex): $error');
-          // 切换到备用地址后重连
-          if (_currentUrlIndex + 1 < _signalingUrls.length) {
-            _currentUrlIndex++;
-            print("🔁 onError 切换到备用地址 #$_currentUrlIndex 并重连");
-            connect();
-          } else {
-            print("🚫 onError 已经是最后一个地址，开始定时重连");
-            _currentUrlIndex = 0;
-            _handleDisconnect();
-          }
-        },
+        _handleMessage,
+        onDone: () => _handleConnectionClose('连接意外关闭'),
+        onError: (error) => _handleConnectionClose('连接出错: $error'),
         cancelOnError: true,
       );
 
@@ -158,39 +112,119 @@ class Signaling {
       _reconnectAttempts = 0;
       _reconnectTimer?.cancel();
       onReconnected?.call();
+      
     } catch (e) {
       print('❌ 信令连接异常 (地址 #$_currentUrlIndex): $e');
       _isConnecting = false;
-      // 如果还有备用地址，切换后重试
-      if (_currentUrlIndex + 1 < _signalingUrls.length) {
-        _currentUrlIndex++;
-        print("🔁 切换到备用地址 #$_currentUrlIndex 并重试");
-        await connect();
-      } else {
-        // 所有地址都试过了，进入定时重连
-        print("🚫 所有信令服务器连接失败，开始定时重连");
-        _currentUrlIndex = 0; // 重置到主地址
-        _scheduleReconnect();
-      }
+      await _tryNextUrlOrReconnect();
     }
   }
 
-  void _handleDisconnect() {
-    print('⚡️ 信令连接断开');
+  /// 处理收到的消息
+  void _handleMessage(data) async {
+    try {
+      final msg = jsonDecode(data);
+
+      if (msg['type'] == 'pong') {
+        _lastPongTime = DateTime.now();
+        return;
+      } else if (msg['type'] == 'ping') {
+        _ws?.sink.add(jsonEncode({'type': 'pong'}));
+        return;
+      }
+
+      if (msg['sdp'] != null) {
+        print("📩 收到 SDP: ${msg['sdp']['type']}");
+        final desc = RTCSessionDescription(msg['sdp']['sdp'], msg['sdp']['type']);
+        onRemoteSDP(desc);
+      } else if (msg['candidate'] != null) {
+        print("📩 收到 Candidate");
+        final candidate = RTCIceCandidate(
+          msg['candidate']['candidate'],
+          msg['candidate']['sdpMid'],
+          msg['candidate']['sdpMLineIndex'],
+        );
+        onRemoteCandidate(candidate);
+      } else if (msg['command'] != null) {
+        final command = msg['command'];
+        onRemoteCommand?.call(command);
+      } else {
+        print("📩 收到未知消息: $msg");
+      }
+    } catch (e) {
+      print('❌ 处理消息失败: $e');
+    }
+  }
+
+  /// 处理连接关闭
+  void _handleConnectionClose(String reason) {
+    print('⚡️ 信令连接关闭: $reason');
     _stopHeartbeat();
     _isConnecting = false;
     _wsSubscription?.cancel();
     _wsSubscription = null;
-    _ws = null;
+    
+    if (_ws != null) {
+      try {
+        if (_ws!.closeCode == null) {
+          _ws!.sink.close();
+        }
+      } catch (e) {
+        print('⚠️ 关闭WebSocket时出错: $e');
+      }
+      _ws = null;
+    }
+    
     onDisconnected?.call();
-    _scheduleReconnect();
+    _tryNextUrlOrReconnect();
   }
 
+  /// 尝试下一个URL或开始重连
+  Future<void> _tryNextUrlOrReconnect() async {
+    // 防止在已经关闭的情况下继续重连
+    if (_reconnectTimer != null) {
+      print('🔄 重连定时器已存在，跳过重复重连');
+      return;
+    }
+    
+    if (_currentUrlIndex + 1 < _signalingUrls.length) {
+      _currentUrlIndex++;
+      print("🔁 切换到备用地址 #$_currentUrlIndex 并重试");
+      // 延迟一下再连接，避免过快重试
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (!_isConnecting) { // 确保没有其他连接在进行
+        connect();
+      }
+    } else {
+      print("🚫 所有地址都已尝试，开始定时重连");
+      _currentUrlIndex = 0; // 重置到主地址
+      _scheduleReconnect();
+    }
+  }
+
+  /// 清理连接资源
+  Future<void> _cleanupConnection() async {
+    _wsSubscription?.cancel();
+    _wsSubscription = null;
+    
+    if (_ws != null) {
+      try {
+        if (_ws!.closeCode == null) {
+          _ws!.sink.close();
+        }
+      } catch (e) {
+        print('⚠️ 清理连接时出错: $e');
+      }
+      _ws = null;
+    }
+  }
+
+  /// 安排重连
   void _scheduleReconnect() {
     if (_reconnectTimer != null) return; // 已经在重连，不要重复定时器
 
     _reconnectAttempts++;
-    final int delay = (_reconnectAttempts * 2).clamp(2, 10); // 重连间隔 2~10秒
+    final int delay = (_reconnectAttempts * 2).clamp(1, 2); // 重连间隔 1~2秒
 
     print('🔄 $delay秒后重试连接 (第$_reconnectAttempts次)');
     _reconnectTimer = Timer(Duration(seconds: delay), () {
@@ -257,17 +291,21 @@ class Signaling {
   void close() {
     print('📴 [Signaling] 开始主动关闭信令连接');
 
+    // 1. 停止心跳
     _stopHeartbeat();
 
-    // 1. 取消重连定时器
+    // 2. 取消重连定时器
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
 
-    // 2. 取消 WebSocket 监听
+    // 3. 重置连接状态，防止新的连接尝试
+    _isConnecting = false;
+
+    // 4. 取消 WebSocket 监听
     _wsSubscription?.cancel();
     _wsSubscription = null;
 
-    // 3. 关闭 WebSocket
+    // 5. 关闭 WebSocket
     if (_ws != null) {
       try {
         if (_ws!.closeCode == null) { // 只有在还没关闭的情况下再主动关
@@ -284,8 +322,8 @@ class Signaling {
       print('ℹ️ [Signaling] WebSocket 已为空，无需关闭');
     }
 
-    // 4. 重置连接状态
-    _isConnecting = false;
+    // 6. 重置重连计数
+    _reconnectAttempts = 0;
 
     print('📴 [Signaling] 信令连接已完全关闭');
   }
@@ -303,7 +341,7 @@ class Signaling {
       if (_lastPongTime != null &&
           now.difference(_lastPongTime!).inSeconds > 60) {
         print('⏱️ 心跳超时，未收到 pong，主动断开连接');
-        _handleDisconnect();
+        _handleConnectionClose('心跳超时');
         return;
       }
 
