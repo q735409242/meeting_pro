@@ -44,6 +44,11 @@ class Signaling {
 
   Timer? _pingTimer;
   DateTime? _lastPongTime;
+  
+  // 智能重连参数
+  int _consecutiveFailures = 0;
+  DateTime? _firstFailureTime;
+  final bool _isNetworkAvailable = true;
 
   Signaling({
     required this.roomId,
@@ -107,8 +112,13 @@ class Signaling {
       print("✅ 信令连接成功 (地址 #$_currentUrlIndex)");
       _startHeartbeat();
       _isConnecting = false;
+      
+      // 重置所有重连相关的计数器
       _reconnectAttempts = 0;
+      _consecutiveFailures = 0;
+      _firstFailureTime = null;
       _reconnectTimer?.cancel();
+      
       onReconnected?.call();
       
     } catch (e) {
@@ -217,18 +227,74 @@ class Signaling {
     }
   }
 
-  /// 安排重连
+  /// 智能重连调度
   void _scheduleReconnect() {
     if (_reconnectTimer != null) return; // 已经在重连，不要重复定时器
 
     _reconnectAttempts++;
-    final int delay = (_reconnectAttempts * 2).clamp(1, 2); // 重连间隔 1~2秒
+    _consecutiveFailures++;
+    
+    // 记录第一次失败时间
+    _firstFailureTime ??= DateTime.now();
+    
+    // 检查是否应该放弃重连
+    if (_shouldGiveUpReconnect()) {
+      print('❌ 信令重连条件不满足，通知上层考虑其他重连策略');
+      onDisconnected?.call();
+      return;
+    }
+    
+    // 智能延迟计算：更快的重连间隔
+    final int baseDelayMs = _calculateReconnectDelay(); // 已经是毫秒
+    final int jitterMs = (baseDelayMs * 0.1).toInt(); // 10%的随机抖动
+    final int randomJitter = jitterMs > 0 ? (DateTime.now().millisecondsSinceEpoch % jitterMs) : 0;
+    final int totalDelayMs = baseDelayMs + randomJitter;
 
-    print('🔄 $delay秒后重试连接 (第$_reconnectAttempts次)');
-    _reconnectTimer = Timer(Duration(seconds: delay), () {
+    print('🔄 信令智能重连: ${totalDelayMs}ms后重试 (第$_reconnectAttempts次, 连续失败$_consecutiveFailures次)');
+    
+    _reconnectTimer = Timer(Duration(milliseconds: totalDelayMs), () {
       _reconnectTimer = null;
-      connect();
+      if (_isNetworkAvailable) {
+        connect();
+      } else {
+        print('⚠️ 网络不可用，延迟重连');
+        _scheduleReconnect();
+      }
     });
+  }
+  
+  /// 计算重连延迟
+  int _calculateReconnectDelay() {
+    // 更激进的重连策略：0.5, 1, 2, 3, 5, 8秒(上限)
+    final delays = [0.5, 1, 2, 3, 5, 8];
+    final index = (_reconnectAttempts - 1).clamp(0, delays.length - 1);
+    return (delays[index] * 1000).toInt(); // 转换为毫秒
+  }
+  
+  /// 判断是否应该放弃重连
+  bool _shouldGiveUpReconnect() {
+    // 最大重连次数限制
+    if (_reconnectAttempts > 20) {
+      print('❌ 超过最大重连次数(20次)');
+      return true;
+    }
+    
+    // 连续失败时间限制
+    if (_firstFailureTime != null) {
+      final failureDuration = DateTime.now().difference(_firstFailureTime!);
+      if (failureDuration.inMinutes > 10) {
+        print('❌ 连续失败时间超过10分钟');
+        return true;
+      }
+    }
+    
+    // 连续失败次数限制
+    if (_consecutiveFailures > 50) {
+      print('❌ 连续失败次数过多(50次)');
+      return true;
+    }
+    
+    return false;
   }
 
   /// 发送 SDP 到对端
@@ -329,23 +395,49 @@ class Signaling {
   void _startHeartbeat() {
     _lastPongTime = DateTime.now();
     _pingTimer?.cancel();
-    _pingTimer = Timer.periodic(const Duration(seconds: 20), (timer) {
+    
+    // 自适应心跳间隔：连接稳定时延长间隔，不稳定时缩短
+    final pingInterval = _calculateHeartbeatInterval();
+    
+    _pingTimer = Timer.periodic(Duration(seconds: pingInterval), (timer) {
       if (_ws == null || _ws!.closeCode != null) {
         timer.cancel();
         return;
       }
 
       final now = DateTime.now();
+      final heartbeatTimeout = pingInterval * 3; // 心跳超时 = 3倍ping间隔
+      
       if (_lastPongTime != null &&
-          now.difference(_lastPongTime!).inSeconds > 60) {
-        print('⏱️ 心跳超时，未收到 pong，主动断开连接');
+          now.difference(_lastPongTime!).inSeconds > heartbeatTimeout) {
+        print('⏱️ 心跳超时(${heartbeatTimeout}s)，未收到 pong，主动断开连接');
         _handleConnectionClose('心跳超时');
         return;
       }
 
-      print('🔄 发送 ping');
-      _ws?.sink.add(jsonEncode({'type': 'ping'}));
+      print('💓 发送心跳 ping (间隔: ${pingInterval}s)');
+      try {
+        _ws?.sink.add(jsonEncode({
+          'type': 'ping',
+          'timestamp': now.millisecondsSinceEpoch,
+        }));
+      } catch (e) {
+        print('❌ 发送心跳失败: $e');
+        _handleConnectionClose('心跳发送失败');
+      }
     });
+  }
+  
+  /// 计算自适应心跳间隔
+  int _calculateHeartbeatInterval() {
+    // 根据连接稳定性调整心跳间隔
+    if (_consecutiveFailures == 0) {
+      return 30; // 连接稳定时，30秒间隔
+    } else if (_consecutiveFailures < 3) {
+      return 20; // 轻微不稳定，20秒间隔
+    } else {
+      return 10; // 连接不稳定，10秒间隔
+    }
   }
 
   void _stopHeartbeat() {
