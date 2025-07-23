@@ -1,3 +1,5 @@
+flutter build web
+flutter build apk --release
 flutter build ios --release --no-codesign
 
 Payload
@@ -8,4 +10,4 @@ Payload
 ./clean-build.sh release
 
 
-flutter run -d web-server --web-port 3000
+flutter run -d web-server --web-port 8080
