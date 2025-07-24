@@ -4,12 +4,16 @@ import 'pages/home_page.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_easyloading/flutter_easyloading.dart';
 import '../method_channels/wakelock_service.dart';
+import 'package:flutter/foundation.dart';
+import 'utils/web_security.dart';
 
 // Web平台条件导入已移除 - 暂时禁用Web特定功能
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  
+  if (kIsWeb) {
+    WebSecurity.initialize();
+  }
   // Web平台性能优化 - 暂时禁用以修复编译问题
   // _initWebOptimizations();
   FlutterForegroundTask.init(

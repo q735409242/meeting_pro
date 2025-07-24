@@ -35,9 +35,6 @@
   
   <!-- 移除WASM预加载 - 在开发环境下会导致404错误 -->
   
-  <!-- 控制台静默脚本 - 最优先加载 -->
-  <script src="console-silence.js"></script>
-  
   <!-- 引入性能优化样式 -->
   <link rel="stylesheet" href="styles.css">
   
@@ -183,25 +180,7 @@
     // Flutter Web配置 - 使用最简配置避免API冲突
     // 移除自定义配置，让Flutter使用默认设置
     
-    // Service Worker注册（仅生产环境）
-    if ('serviceWorker' in navigator) {
-      const isDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-      
-      if (!isDev) {
-        // 仅在生产环境注册Service Worker
-        window.addEventListener('load', function() {
-          navigator.serviceWorker.register('/sw.js')
-            .then(function(registration) {
-              // 生产环境静默
-            })
-            .catch(function(error) {
-              // 生产环境静默
-            });
-        });
-      } else {
-        // 开发环境：跳过Service Worker注册
-      }
-    }
+    // Service Worker已删除 - 简化Web应用结构
     
     // 错误处理
     window.addEventListener('error', function(e) {
