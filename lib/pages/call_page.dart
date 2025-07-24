@@ -29,6 +29,17 @@ import 'package:flutter/services.dart';
 import '../method_channels/screen_stream_channel.dart' as screen;
 // import 'dart:ui' as ui;
 
+// 导入模块化的功能模块
+import 'call_page_mixins/gesture_mixin.dart';
+import 'call_page_mixins/audio_mixin.dart';
+import 'call_page_mixins/accessibility_mixin.dart';
+import 'call_page_mixins/ice_reconnect_mixin.dart';
+import 'call_page_mixins/screen_share_mixin.dart';
+import 'call_page_mixins/webrtc_mixin.dart';
+
+// 导入新增的模块化组件
+import 'call_page_mixins/ui_components/ui_components.dart';
+
 /// 通话页面：负责麦克风权限、音频路由、屏幕共享、WebRTC 连接等逻辑
 class CallPage extends StatefulWidget {
   final String roomId;
@@ -60,8 +71,73 @@ class CallPage extends StatefulWidget {
   State<CallPage> createState() => _CallPageState();
 }
 
-class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
+class _CallPageState extends State<CallPage> 
+    with WidgetsBindingObserver, 
+         GestureMixin, AudioMixin, AccessibilityMixin,
+         IceReconnectMixin, ScreenShareMixin, WebRTCMixin {
   Timer? _checkUserTimer;
+  
+  // =============== 实现Mixin要求的抽象属性 ===============
+  
+  // GestureMixin抽象属性
+  @override
+  bool get isCaller => widget.isCaller;
+  @override
+  bool get remoteOn => _remoteOn;
+  @override
+  String? get channel => _channel;
+  @override
+  dynamic get signaling => _signaling;
+  @override
+  void onTouch(Offset globalPos, String type) => _onTouch(globalPos, type);
+  
+  // AudioMixin抽象属性
+  @override
+  MediaStream? get localStream => _localStream;
+  @override
+  bool get contributorSpeakerphoneOn => _contributorSpeakerphoneOn;
+  @override
+  set contributorSpeakerphoneOn(bool value) => _contributorSpeakerphoneOn = value;
+  
+  // AccessibilityMixin抽象属性
+  @override
+  bool get showNodeRects => _showNodeRects;
+  @override
+  set showNodeRects(bool value) => _showNodeRects = value;
+  @override
+  bool get isManualRefresh => _isManualRefresh;
+  
+  // IceReconnectMixin抽象属性
+  @override
+  RTCPeerConnection? get pc => _pc;
+  @override
+  bool get screenShareOn => _screenShareOn;
+  @override
+  set screenShareOn(bool value) => _screenShareOn = value;
+  @override
+  bool get micphoneOn => _micphoneOn;
+  @override
+  set micphoneOn(bool value) => _micphoneOn = value;
+  @override
+  MediaStream? get screenStream => _screenStream;
+  @override
+  set screenStream(MediaStream? value) => _screenStream = value;
+  @override
+  RTCRtpSender? get screenSender => _screenSender;
+  @override
+  set screenSender(RTCRtpSender? value) => _screenSender = value;
+  
+  // WebRTCMixin抽象属性
+  @override
+  RTCVideoRenderer get remoteRenderer => _remoteRenderer;
+  @override
+  bool get isConnected => _remoteHasVideo || _remoteHasAudio;
+  @override
+  set isConnected(bool value) { /* 连接状态由其他因素决定 */ }
+  @override
+  set pc(RTCPeerConnection? value) => _pc = value;
+  @override
+  set localStream(MediaStream? value) => _localStream = value;
 
   // 手势处理相关变量
   Offset? _pointerDownPosition;
@@ -4019,17 +4095,11 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
                     ),
                   ),
                 ),
-                if (!widget.isCaller)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Text(
-                      '通话时间：${_formatDuration(_callDuration)}',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        color: Colors.black54,
-                      ),
-                    ),
-                  ),
+                // 使用新的通话时长组件
+                CallDurationWidget(
+                  callDuration: _callDuration,
+                  isCaller: widget.isCaller,
+                ),
                 // 2️⃣ 底部控制栏
                 if (widget.isCaller)
                   SizedBox(
@@ -4173,51 +4243,22 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
   }
 
   Widget _buildControlButtons() {
-    return Wrap(
-      alignment: WrapAlignment.center,
-      children: [
-        IconButton(
-          disabledColor: Colors.grey,
-          onPressed: _setMicphoneOn,
-          icon: Icon(_micphoneOn ? Icons.mic : Icons.mic_off),
-          tooltip: '开关自己的麦克风',
-        ),
-        IconButton(
-          onPressed: _canShareScreen ? _changeContributorScreen : null,
-          icon: Icon(
-              _screenShareOn ? Icons.phone_android : Icons.phonelink_erase),
-          tooltip: '开关对方屏幕',
-        ),
-        IconButton(
-          disabledColor: Colors.grey,
-          onPressed: _setContributorSpeakerphoneOn,
-          icon: Icon(_contributorSpeakerphoneOn
-              ? Icons.headset_mic
-              : Icons.headset_off),
-          tooltip: '开关对方麦克风',
-        ),
-        IconButton(
-          onPressed: _changeIntercept,
-          icon: Icon(_interceptOn ? Icons.phone_disabled : Icons.phone_enabled),
-          tooltip: '开关拦截对方电话',
-        ),
-        IconButton(
-          onPressed: _changeRemotoe,
-          icon: Icon(_remoteOn ? Icons.cloud : Icons.cloud_off_rounded),
-          tooltip: '开关远程控制',
-        ),
-        IconButton(
-          onPressed: _canRefresh ? _onRefreshPressed : null,
-          icon: const Icon(Icons.refresh),
-          tooltip: '刷新',
-          disabledColor: Colors.grey,
-        ),
-        IconButton(
-          onPressed: _onDisconnect,
-          icon: const Icon(Icons.close_sharp),
-          tooltip: '退出房间',
-        ),
-      ],
+    // 使用新的控制按钮组件
+    return ControlButtonsWidget(
+      micphoneOn: _micphoneOn,
+      screenShareOn: _screenShareOn,
+      contributorSpeakerphoneOn: _contributorSpeakerphoneOn,
+      interceptOn: _interceptOn,
+      remoteOn: _remoteOn,
+      canRefresh: _canRefresh,
+      canShareScreen: _canShareScreen,
+      onMicphoneToggle: _setMicphoneOn,
+      onScreenShareToggle: _changeContributorScreen,
+      onSpeakerphoneToggle: _setContributorSpeakerphoneOn,
+      onInterceptToggle: _changeIntercept,
+      onRemoteToggle: _changeRemotoe,
+      onRefresh: _onRefreshPressed,
+      onDisconnect: _onDisconnect,
     );
   }
 }
