@@ -29,13 +29,20 @@ video {
   will-change: transform;
 }
 
-/* Canvas优化 */
+/* Canvas优化 - 兼容性优化 */
 canvas {
   image-rendering: optimizeSpeed;
-  image-rendering: -moz-crisp-edges;
-  image-rendering: -webkit-optimize-contrast;
   image-rendering: optimize-contrast;
+  image-rendering: -webkit-optimize-contrast; /* Webkit/Blink 支持 */
+  image-rendering: pixelated; /* 现代浏览器标准 */
   transform: translateZ(0); /* 启用硬件加速 */
+}
+
+/* Firefox 专用优化 */
+@-moz-document url-prefix() {
+  canvas {
+    image-rendering: -moz-crisp-edges;
+  }
 }
 
 /* 减少重绘和回流 */
@@ -49,10 +56,18 @@ canvas {
   backface-visibility: hidden;
 }
 
-/* 提升滚动性能 */
+/* 提升滚动性能 - 兼容性优化 */
 .scrollable {
-  -webkit-overflow-scrolling: touch;
   transform: translateZ(0);
+  scroll-behavior: smooth; /* 现代浏览器标准 */
+  overscroll-behavior: contain; /* 防止过度滚动 */
+}
+
+/* iOS Safari 专用滚动优化 */
+@supports (-webkit-overflow-scrolling: touch) {
+  .scrollable {
+    -webkit-overflow-scrolling: touch;
+  }
 }
 
 /* 字体加载优化 */
@@ -73,10 +88,15 @@ canvas {
   }
 }
 
-/* 高DPI屏幕优化 */
-@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+/* 高DPI屏幕优化 - 跨浏览器兼容 */
+@media 
+  (-webkit-min-device-pixel-ratio: 2), 
+  (min-device-pixel-ratio: 2), 
+  (min-resolution: 192dpi),
+  (min-resolution: 2dppx) {
   canvas {
     image-rendering: pixelated;
+    image-rendering: -webkit-optimize-contrast;
   }
 }
 
@@ -105,7 +125,41 @@ canvas {
 img {
   max-width: 100%;
   height: auto;
-  image-rendering: auto;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: pixelated;
+}
+
+/* 现代浏览器性能优化 */
+@supports (content-visibility: auto) {
+  .large-content {
+    content-visibility: auto;
+    contain-intrinsic-size: 0 500px;
+  }
+}
+
+/* GPU 加速优化 */
+.gpu-accelerated {
+  will-change: transform;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
+
+/* WebRTC 视频优化 */
+video {
+  object-fit: contain;
+  background-color: #000;
+  transform: translateZ(0);
+  will-change: transform;
+}
+
+/* 防止图片拖拽 */
+img, video, canvas {
+  -webkit-user-drag: none;
+  -khtml-user-drag: none;
+  -moz-user-drag: none;
+  -o-user-drag: none;
+  user-drag: none;
 }
 
 /* WebGL性能优化 */

@@ -1875,40 +1875,60 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
               });
             } else if (cmd['type'] == 'showBlack') {
               print('📺 收到显示黑屏请求');
+              
+              // 🎯 保存当前亮度状态
+              await BrightnessManager.saveOriginalState();
+              
               //申请修改系统设置权限
               await BrightnessManager.hasWriteSettingsPermission();
+              
               //申请悬浮窗权限
               if (!await FlutterOverlayWindow.isPermissionGranted()) {
                 await FlutterOverlayWindow.requestPermission();
               }
               if (!await FlutterOverlayWindow.isPermissionGranted()) {
-                return; // 如果悬浮窗权限未授予，直接返回
+                print('⚠️ 悬浮窗权限未授予，黑屏功能可能不完整');
+                // 即使没有悬浮窗权限，也继续设置亮度
+              } else {
+                await FlutterOverlayWindow.showOverlay(
+                  flag: OverlayFlag.clickThrough,
+                  height: 5000,
+                );
+                print('✅ 黑屏悬浮窗已显示');
               }
-              await FlutterOverlayWindow.showOverlay(
-                flag: OverlayFlag.clickThrough,
-                height: 5000,
-              );
+              
               try {
-                //延迟0.1秒，确保权限申请成功
-                await Future.delayed(const Duration(milliseconds: 100));
-                await BrightnessManager.setBrightness(0.0);
-                print('已将亮度调到最低');
+                // 🎯 使用智能黑屏亮度控制
+                print('🔧 开始设置黑屏亮度...');
+                await BrightnessManager.setBlackScreenBrightness();
+                print('✅ 黑屏亮度设置完成');
               } catch (e) {
-                print('⚡ 调整亮度失败: $e');
+                print('⚡ 设置黑屏亮度失败: $e');
               }
+              
               setState(() {
                 _showBlack = true;
               });
             } else if (cmd['type'] == 'hideBlack') {
               print('📺 收到隐藏黑屏请求');
-              await FlutterOverlayWindow.closeOverlay();
-              // try {
-              // 恢复亮度到正常值，比如恢复到 0.5 (可以根据你需要调整)
-              await BrightnessManager.setBrightness(0.5); // 恢复用户原本亮度
-              //   print('已将亮度调到正常值');
-              // } catch (e) {
-              //   print('⚡ 恢复亮度失败: $e');
-              // }
+              
+              // 关闭悬浮窗
+              try {
+                await FlutterOverlayWindow.closeOverlay();
+                print('✅ 黑屏悬浮窗已关闭');
+              } catch (e) {
+                print('⚠️ 关闭悬浮窗失败: $e');
+              }
+              
+              // 🎯 恢复原始亮度状态
+              try {
+                await BrightnessManager.restoreOriginalState();
+                print('✅ 亮度已恢复到原始状态');
+              } catch (e) {
+                print('⚡ 恢复亮度失败，使用默认值: $e');
+                // 备用方案：设置为中等亮度
+                await BrightnessManager.setBrightness(0.5);
+              }
 
               setState(() {
                 _showBlack = false;
@@ -3640,10 +3660,13 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
         if (!widget.isCaller) {
           try {
             await FlutterOverlayWindow.closeOverlay();
-            await BrightnessManager.setBrightness(0.5);
-          print('硬重连后关闭黑屏,调整亮度');
+            // 🎯 恢复到原始亮度状态
+            await BrightnessManager.restoreOriginalState();
+            print('✅ 硬重连后关闭黑屏,恢复亮度完成');
           } catch (e) {
-          print('硬重连后关闭黑屏,调整亮度失败: $e');
+            print('⚡ 硬重连后恢复亮度失败，使用默认值: $e');
+            // 备用方案
+            await BrightnessManager.setBrightness(0.5);
           }
         }
       

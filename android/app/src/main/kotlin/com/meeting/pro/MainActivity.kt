@@ -252,6 +252,24 @@ class MainActivity : FlutterActivity() {
                         }
                         result.success(isEnabled)
                     }
+                    "setSystemBrightness" -> {
+                        val brightness = call.argument<Double>("brightness") ?: 0.0
+                        try {
+                            // 🎯 强制设置系统亮度到真正的最低值
+                            setSystemBrightnessToMinimum(brightness.toFloat())
+                            result.success(null)
+                        } catch (e: Exception) {
+                            result.error("BRIGHTNESS_ERROR", e.message, null)
+                        }
+                    }
+                    "getMinimumBrightness" -> {
+                        try {
+                            val minBrightness = getDeviceMinimumBrightness()
+                            result.success(minBrightness)
+                        } catch (e: Exception) {
+                            result.error("MIN_BRIGHTNESS_ERROR", e.message, null)
+                        }
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -277,6 +295,112 @@ class MainActivity : FlutterActivity() {
             wakeLock?.release()
             wakeLock = null
             Log.i("MainActivity", "WakeLock released")
+        }
+    }
+    
+    // ==================== 亮度控制优化 ====================
+    
+    /**
+     * 设置系统亮度到真正的最低值
+     */
+    private fun setSystemBrightnessToMinimum(targetBrightness: Float) {
+        try {
+            // 🎯 先禁用自动亮度
+            Settings.System.putInt(
+                contentResolver,
+                Settings.System.SCREEN_BRIGHTNESS_MODE,
+                Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
+            )
+            
+            // 🎯 获取设备的真实最低亮度值
+            val deviceMinBrightness = getDeviceMinimumBrightness()
+            
+            // 🎯 计算目标亮度值（0-255范围）
+            val targetValue = if (targetBrightness <= 0.01f) {
+                // 如果目标是很低的值，使用设备最低值
+                deviceMinBrightness
+            } else {
+                // 否则按比例计算
+                (targetBrightness * 255).toInt().coerceAtLeast(deviceMinBrightness)
+            }
+            
+            Log.i("MainActivity", "🔧 设置亮度: 目标=$targetBrightness, 计算值=$targetValue, 设备最低=$deviceMinBrightness")
+            
+            // 🎯 设置系统亮度
+            Settings.System.putInt(
+                contentResolver,
+                Settings.System.SCREEN_BRIGHTNESS,
+                targetValue
+            )
+            
+            // 🎯 同时设置Activity的亮度（立即生效）
+            val layoutParams = window.attributes
+            layoutParams.screenBrightness = targetValue / 255.0f
+            window.attributes = layoutParams
+            
+            Log.i("MainActivity", "✅ 亮度设置完成: $targetValue/255")
+            
+        } catch (e: Exception) {
+            Log.e("MainActivity", "❌ 设置亮度失败: ${e.message}")
+            throw e
+        }
+    }
+    
+    /**
+     * 获取设备的真实最低亮度值
+     */
+    private fun getDeviceMinimumBrightness(): Int {
+        try {
+            // 🎯 不同厂商的最低亮度适配
+            val manufacturer = Build.MANUFACTURER.lowercase()
+            val model = Build.MODEL.lowercase()
+            
+            Log.i("MainActivity", "🔍 设备信息: $manufacturer $model")
+            
+            val minBrightness = when {
+                // 小米设备
+                manufacturer.contains("xiaomi") || manufacturer.contains("redmi") -> {
+                    when {
+                        model.contains("note") || model.contains("pro") -> 2
+                        Build.VERSION.SDK_INT >= 29 -> 1  // Android 10+
+                        else -> 3
+                    }
+                }
+                // 华为/荣耀设备
+                manufacturer.contains("huawei") || manufacturer.contains("honor") -> {
+                    when {
+                        Build.VERSION.SDK_INT >= 29 -> 1
+                        else -> 2
+                    }
+                }
+                // OPPO/一加设备
+                manufacturer.contains("oppo") || manufacturer.contains("oneplus") -> {
+                    if (Build.VERSION.SDK_INT >= 30) 1 else 2
+                }
+                // vivo设备
+                manufacturer.contains("vivo") -> {
+                    if (model.contains("x") || model.contains("s")) 1 else 2
+                }
+                // 三星设备
+                manufacturer.contains("samsung") -> {
+                    when {
+                        model.contains("galaxy s") || model.contains("galaxy note") -> 3
+                        model.contains("galaxy a") -> 2
+                        else -> 2
+                    }
+                }
+                // 谷歌原生设备
+                manufacturer.contains("google") -> 0
+                // 其他设备
+                else -> 1
+            }
+            
+            Log.i("MainActivity", "📱 设备最低亮度值: $minBrightness")
+            return minBrightness
+            
+        } catch (e: Exception) {
+            Log.w("MainActivity", "⚠️ 获取最低亮度失败，使用默认值: ${e.message}")
+            return 1 // 默认最低值
         }
     }
 }
