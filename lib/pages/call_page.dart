@@ -160,6 +160,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
   RTCIceConnectionState? _currentIceState;
   bool _isIceReconnecting = false;
   int _iceReconnectAttempts = 0;
+  bool _isManualRefresh = false; // 标记是否为手动刷新
   
   // 重连前的状态保存
   bool _savedScreenShareOn = false;
@@ -1451,21 +1452,29 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
                 _remoteHasAudio = false;
                 // 🎯 ICE重连期间保持屏幕共享状态，不要关闭
               });
-              EasyLoading.showToast('网络波动，正在重连...', duration: const Duration(seconds: 2));
+              // 只有非手动刷新的ICE重连才显示网络不稳定提示
+              if (!_isManualRefresh) {
+                EasyLoading.showToast('对方网络不稳定，正在重连...', duration: const Duration(seconds: 2));
+              }
             }
           },
           onReconnectSuccess: () {
             if (mounted) {
+              print('✅ ICE重连成功，屏幕共享状态: $_savedScreenShareOn');
+              // 只有非手动刷新的ICE重连成功才显示提示
+              if (!_isManualRefresh) {
+                EasyLoading.showToast('重连成功', duration: const Duration(seconds: 2));
+              }
+              
               setState(() {
                 _isIceReconnecting = false;
                 _iceReconnectAttempts = 0;
                 _icerefresh = false;
                 _isrefresh = false;
+                _isManualRefresh = false; // 重置手动刷新标记
                 // 🎯 ICE重连成功，确保屏幕共享状态正确
                 _screenShareOn = _savedScreenShareOn;
               });
-              print('✅ ICE重连成功，屏幕共享状态: $_savedScreenShareOn');
-              EasyLoading.showToast('重连成功', duration: const Duration(seconds: 2));
               
               // 🎬 如果之前有屏幕共享，主控端需要重新建立连接
               if (_savedScreenShareOn) {
@@ -1493,10 +1502,10 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
                 print('ℹ️ 主控端：ICE重连成功，但之前无屏幕共享');
               }
               
-              // 📄 恢复页面读取功能
+              // 📄 恢复页面读取功能 - 增加延迟确保无障碍服务准备就绪
               if (_savedShowNodeRects && _signaling != null) {
                 print('📄 ICE重连成功后恢复页面读取功能');
-                Future.delayed(const Duration(seconds: 1), () {
+                Future.delayed(const Duration(seconds: 3), () { // 从1秒增加到3秒
                   if (mounted) {
                     _restorePageReadingAfterReconnect();
                   }
@@ -1509,7 +1518,10 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
               setState(() {
                 _iceReconnectAttempts = _iceReconnectManager!.getStatus()['reconnectAttempts'] ?? 0;
               });
-              EasyLoading.showError('网络重连失败: $error');
+              // 只有非手动刷新的ICE重连失败才显示提示
+              if (!_isManualRefresh) {
+                EasyLoading.showError('网络重连失败: $error');
+              }
             }
           },
           onGiveUp: () {
@@ -1517,6 +1529,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
               setState(() {
                 _isIceReconnecting = false;
                 _iceReconnectAttempts = 0;
+                _isManualRefresh = false; // 重置手动刷新标记
                 
                 // 🎯 ICE重连彻底失败，现在清理视频状态
                 print('🎮 ICE重连彻底失败，清理视频音频状态');
@@ -1988,6 +2001,21 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
             } else if (cmd['type'] == 'accessibility_tree_error') {
               final error = cmd['error'] as String;
               print('❌ 对方设备节点树获取失败: $error');
+              
+              // 特殊处理无障碍服务相关错误
+              if (error.contains('rootInActiveWindow') || error.contains('无障碍')) {
+                print('📄 检测到无障碍服务问题，延迟重试...');
+                EasyLoading.showToast('对方无障碍服务正在恢复，请稍候...', duration: const Duration(seconds: 2));
+                
+                // 延迟重试
+                Future.delayed(const Duration(seconds: 3), () {
+                  if (mounted && _showNodeRects && _signaling != null) {
+                    print('📄 重新尝试页面读取...');
+                    _signaling!.sendCommand({'type': 'show_view'});
+                  }
+                });
+              }
+              
               setState(() {
                 _nodeRects.clear(); // 清空节点显示
               });
@@ -1999,6 +2027,19 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
                 // 检查是否是错误信息
                 if (treeJson.startsWith('⚠️')) {
                   print('⚠️ 收到节点树错误: $treeJson');
+                  
+                  // 特殊处理ICE重连后的rootInActiveWindow问题
+                  if (treeJson.contains('rootInActiveWindow')) {
+                    print('📄 检测到rootInActiveWindow问题，可能是ICE重连后无障碍服务未就绪');
+                    // 延迟重试页面读取
+                    Future.delayed(const Duration(seconds: 2), () {
+                      if (mounted && _showNodeRects && _signaling != null) {
+                        print('📄 重新尝试页面读取...');
+                        _signaling!.sendCommand({'type': 'show_view'});
+                      }
+                    });
+                  }
+                  
                   setState(() {
                     _nodeRects.clear(); // 清空之前的节点
                   });
@@ -2828,8 +2869,14 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
         // 🎯 关键：页面读取场景下，UI会根据_showNodeRects正确显示黑屏+节点框框
         print('📄 页面读取恢复：当前状态 - _showNodeRects=true, _remoteHasVideo=$_remoteHasVideo');
         
-        // 立即发送一次页面读取请求
-        _signaling!.sendCommand({'type': 'show_view'});
+        // 延迟发送页面读取请求，给无障碍服务更多准备时间
+        print('📄 延迟发送第一次页面读取请求...');
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (_signaling != null && _showNodeRects && mounted) {
+            print('📄 发送第一次页面读取请求');
+            _signaling!.sendCommand({'type': 'show_view'});
+          }
+        });
         
         // 重新启动定时器
         _nodeTreeTimer?.cancel(); // 确保没有重复的定时器
@@ -4100,11 +4147,22 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     if (confirmed != true) return;
     
     // 确认后立即禁用按钮，开始5秒冷却
-    setState(() => _canRefresh = false);
+    setState(() {
+      _canRefresh = false;
+      _isManualRefresh = true; // 标记为手动刷新
+    });
+    
+    // 显示手动刷新提示
+    EasyLoading.showToast('正在刷新，请稍候...', duration: const Duration(seconds: 2));
     
     try {
       await _refresh(); // 执行刷新方法
     } finally {
+      // 立即重置手动刷新标记
+      if (mounted) {
+        setState(() => _isManualRefresh = false);
+      }
+      
       // 5 秒后恢复按钮可用
       Future.delayed(const Duration(seconds: 5), () {
         if (mounted) {

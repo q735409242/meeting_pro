@@ -332,7 +332,22 @@ class TalkBackService : AccessibilityService() {
      */
     fun dumpNodeTree(): String {
         return try {
-            val root = rootInActiveWindow ?: return "⚠️ 无 rootInActiveWindow"
+            // 添加重试机制，提高无障碍服务稳定性
+            var root = rootInActiveWindow
+            if (root == null) {
+                Log.w("TalkBackService", "首次获取rootInActiveWindow失败，等待500ms后重试...")
+                Thread.sleep(500)
+                root = rootInActiveWindow
+            }
+            if (root == null) {
+                Log.w("TalkBackService", "第二次获取rootInActiveWindow失败，等待1000ms后最后一次重试...")
+                Thread.sleep(1000)
+                root = rootInActiveWindow
+            }
+            if (root == null) {
+                Log.e("TalkBackService", "三次尝试均无法获取rootInActiveWindow，可能是无障碍权限问题")
+                return "⚠️ 无 rootInActiveWindow - 请检查无障碍权限或稍后重试"
+            }
             
             // 添加安全检查和限制（已优化）
             val startTime = System.currentTimeMillis()
