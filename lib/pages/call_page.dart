@@ -811,10 +811,10 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     _savedVideoOffsetY = offsetY;
     _hasValidVideoContainerInfo = true;
     
-    print('📱 保存容器信息: 位置=${topLeft.dx.toStringAsFixed(1)},${topLeft.dy.toStringAsFixed(1)}, '
-          '容器=${viewW.toStringAsFixed(1)}x${viewH.toStringAsFixed(1)}, '
-          '显示=${dispW.toStringAsFixed(1)}x${dispH.toStringAsFixed(1)}, '
-          '偏移=${offsetX.toStringAsFixed(1)},${offsetY.toStringAsFixed(1)}');
+    // print('📱 保存容器信息: 位置=${topLeft.dx.toStringAsFixed(1)},${topLeft.dy.toStringAsFixed(1)}, '
+    //       '容器=${viewW.toStringAsFixed(1)}x${viewH.toStringAsFixed(1)}, '
+    //       '显示=${dispW.toStringAsFixed(1)}x${dispH.toStringAsFixed(1)}, '
+    //       '偏移=${offsetX.toStringAsFixed(1)},${offsetY.toStringAsFixed(1)}');
     
     // 计算点击在视频显示区域内的坐标
     final localX = clientPosition.dx - topLeft.dx - offsetX;
@@ -2832,7 +2832,16 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
   //开关显示黑屏
   void _changeBlackScreen() async {
     _showBlack = !_showBlack;
-    await EasyLoading.showToast(_showBlack ? '已开启黑屏,如果不生效请回到app打开权限后再次开启' : '已关闭黑屏');
+    if (_showBlack) {
+      // 开启黑屏时显示3秒的权限提示
+      await EasyLoading.showToast(
+        '已开启黑屏\n如果不生效请回到App打开权限后再次开启',
+        duration: const Duration(seconds: 3),
+      );
+    } else {
+      // 关闭黑屏时显示正常时长
+      await EasyLoading.showToast('已关闭黑屏');
+    }
     _showBlack ? _onBlackScreen(true) : _onBlackScreen(false);
     setState(() {});
   }
