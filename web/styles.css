@@ -148,7 +148,7 @@ img {
 /* WebRTC 视频优化 */
 video {
   object-fit: contain;
-  background-color: #000;
+  background-color: transparent; /* 🎯 Web端使用透明背景，避免黑色背景 */
   transform: translateZ(0);
   will-change: transform;
 }
