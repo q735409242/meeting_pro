@@ -70,9 +70,18 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
   static const double _tapThreshold = 10.0; // 点击阈值：移动距离小于10像素认为是点击
   static const int _tapTimeThreshold = 500; // 点击时间阈值：500ms内认为是点击
   
-  // Web平台的点击阈值（鼠标更精确）
-  static double get _webTapThreshold => kIsWeb ? 5.0 : _tapThreshold;
+  // Web平台的点击阈值（鼠标更精确，降低阈值提高拖拽响应）
+  static double get _webTapThreshold => kIsWeb ? 3.0 : _tapThreshold; // 从5.0降低到3.0
   static int get _webTapTimeThreshold => kIsWeb ? 300 : _tapTimeThreshold;
+  
+  // 长按支持相关变量
+  Timer? _longPressTimer;
+  bool _isLongPressing = false;
+  bool _longPressTriggered = false;
+  static const int _longPressThreshold = 600; // 长按阈值：600ms
+  
+  // 键盘监听相关
+  FocusNode? _keyboardFocusNode;
   final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
   RTCPeerConnection? _pc;
   MediaStream? _localStream;
@@ -206,6 +215,11 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     _remoteRenderer.initialize();
     _initializeCall();
     if (!widget.isCaller) _startDurationTimer(); // ← 只有被控端启动
+    
+    // Web端键盘事件监听 - 只有主控端需要
+    if (kIsWeb && widget.isCaller) {
+      _setupKeyboardListener();
+    }
     // 初始化视频帧接收通道
     if (!kIsWeb && Platform.isIOS) {
       _screenStreamChannel = screen.ScreenStreamChannel();
@@ -253,6 +267,70 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     _setupWebPageRefreshConfirmation();
   }
 
+  /// 设置Web平台键盘监听器
+  void _setupKeyboardListener() {
+    if (!kIsWeb || !widget.isCaller) return;
+    
+    print('🎹 设置Web端键盘监听器');
+    _keyboardFocusNode = FocusNode();
+    
+    // 确保焦点节点能接收键盘事件
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_keyboardFocusNode != null && mounted) {
+        _keyboardFocusNode!.requestFocus();
+        print('🎹 键盘监听器焦点已获取');
+      }
+    });
+  }
+  
+  /// 处理键盘输入事件
+  void _handleKeyboardInput(String text) {
+    // 只有主控端且开启远程控制时才发送键盘输入
+    if (!widget.isCaller || !_remoteOn) return;
+    
+    String displayText = text;
+    if (text == 'BACKSPACE') {
+      displayText = '退格键';
+    } else if (text == 'ENTER') {
+      displayText = '回车键';
+    } else if (text.startsWith('PASTE:')) {
+      displayText = '黏贴内容';
+    }
+    
+    print('🎹 Web端键盘输入: "$displayText"');
+    
+    if (_channel == 'cf') {
+      _signaling?.sendCommand({
+        'type': 'key_input',
+        'text': text,
+      });
+      print('🎹 已发送键盘输入命令: "$displayText"');
+    }
+  }
+  
+  /// 处理黏贴操作
+  void _handlePasteOperation() async {
+    try {
+      print('🎹 开始获取剪切板内容...');
+      
+      // 获取剪切板内容
+      final clipboardData = await Clipboard.getData(Clipboard.kTextPlain);
+      final pasteText = clipboardData?.text;
+      
+      if (pasteText != null && pasteText.isNotEmpty) {
+        print('🎹 获取到剪切板内容: "${pasteText.length > 50 ? pasteText.substring(0, 50) + '...' : pasteText}"');
+        
+        // 发送黏贴命令，使用特殊格式标识
+        _handleKeyboardInput('PASTE:$pasteText');
+      } else {
+        print('🎹 剪切板为空或无文本内容');
+      }
+    } catch (e) {
+      print('🎹 获取剪切板内容失败: $e');
+    }
+  }
+  
+      
   /// 设置Web平台页面刷新前确认
   void _setupWebPageRefreshConfirmation() {
     if (kIsWeb) {
@@ -528,79 +606,66 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     }
   }
 
-  // 处理pointer down事件
+  // 处理pointer down事件 - 支持长按检测
   void _onPointerDown(Offset globalPos) {
-    print('🖱️ pointer down触发 - isCaller: ${widget.isCaller}, remoteOn: $_remoteOn, pos: ${globalPos.dx}, ${globalPos.dy}');
-    
-    // 先不管条件，直接测试是否能触发
     _pointerDownPosition = globalPos;
     _pointerDownTime = DateTime.now().millisecondsSinceEpoch;
     _isDragging = false;
-    print('🖱️ 已记录pointer down数据');
+    _longPressTriggered = false;
     
     if (!widget.isCaller || !_remoteOn) {
-      print('🚫 条件不满足但已记录数据 - isCaller: ${widget.isCaller}, remoteOn: $_remoteOn');
       return;
     }
     
-    if (kIsWeb) {
-      print('🖱️ Web平台 - 指针按下记录: ${globalPos.dx}, ${globalPos.dy}, 时间: $_pointerDownTime');
-    } else {
-      // 移动端立即发送swipStart
+    // 启动长按检测定时器
+    _startLongPressTimer(globalPos);
+    
+    // 移动端立即发送swipStart，Web端等待移动确认
+    if (!kIsWeb) {
       _onTouch(globalPos, 'swipStart');
     }
+    
+    print('🖱️ 按下: (${globalPos.dx.toInt()}, ${globalPos.dy.toInt()}) - 长按检测已启动');
   }
   
-  // 处理pointer move事件
+  // 处理pointer move事件 - 支持长按和拖拽
   void _onPointerMove(Offset globalPos) {
     if (!widget.isCaller || !_remoteOn || _pointerDownPosition == null) return;
     
     final distance = (globalPos - _pointerDownPosition!).distance;
     
-    // 如果移动距离超过阈值，标记为拖拽
+    // 如果移动距离超过阈值，取消长按检测并标记为拖拽
     if (distance > _webTapThreshold) {
+      // 取消长按检测
+      _cancelLongPressTimer();
+      
       if (!_isDragging) {
-        // 第一次确认为拖拽
+        // 第一次确认为拖拽 - 立即发送swipStart提高响应速度
         _isDragging = true;
-        if (kIsWeb) {
-          print('🖱️ Web平台 - 开始拖拽，距离: ${distance.toStringAsFixed(1)}px');
-          // Web平台延迟发送swipStart，确保是真正的拖拽
-          _onTouch(_pointerDownPosition!, 'swipStart');
-        }
+        print('🖱️ 检测到拖拽开始，距离: ${distance.toStringAsFixed(1)}px - 长按检测已取消');
+        _onTouch(_pointerDownPosition!, 'swipStart');
       }
       
-      // 发送滑动移动事件
+      // 立即发送滑动移动事件，不做额外延迟
       _onTouch(globalPos, 'swipMove');
-    } else if (kIsWeb && distance > 0) {
-      // Web平台显示小幅移动，但不触发拖拽
-      print('🖱️ Web平台 - 小幅移动，距离: ${distance.toStringAsFixed(1)}px (阈值: ${_webTapThreshold}px)');
+    } else if (distance > 1.0) {
+      // 显示微小移动，但不触发拖拽，保持长按检测
+      print('🖱️ 微小移动，距离: ${distance.toStringAsFixed(1)}px (阈值: ${_webTapThreshold}px) - 长按检测继续');
     }
-    // 如果移动距离很小，不发送move事件，等待up事件判断是否为点击
   }
   
-  // 处理pointer up事件
+  // 处理pointer up事件 - 支持长按、点击和拖拽
   void _onPointerUp(Offset globalPos) {
-    print('🖱️ pointer up触发 - isCaller: ${widget.isCaller}, remoteOn: $_remoteOn, pos: ${globalPos.dx}, ${globalPos.dy}');
-    print('🖱️ pointer up状态 - downPos: $_pointerDownPosition, downTime: $_pointerDownTime, isDragging: $_isDragging');
-    
-    // 检查是否有down数据（即使条件不满足也要检查Listener是否工作）
+    // 检查是否有down数据
     if (_pointerDownPosition == null) {
-      print('❌ 没有pointer down数据，可能Listener有问题');
       return;
     }
     
+    // 取消长按检测定时器
+    _cancelLongPressTimer();
+    
     if (!widget.isCaller || !_remoteOn) {
-      print('🚫 pointer up条件不满足但有down数据 - isCaller: ${widget.isCaller}, remoteOn: $_remoteOn');
-      // 仍然进行测试处理，确认事件链路
-      final currentTime = DateTime.now().millisecondsSinceEpoch;
-      final duration = currentTime - (_pointerDownTime ?? currentTime);
-      final distance = (globalPos - _pointerDownPosition!).distance;
-      print('🧪 测试数据 - 距离: ${distance.toStringAsFixed(1)}px, 时长: ${duration}ms');
-      
-      // 清理状态
-      _pointerDownPosition = null;
-      _pointerDownTime = null;
-      _isDragging = false;
+      _clearPointerData();
       return;
     }
     
@@ -608,46 +673,70 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     final duration = currentTime - (_pointerDownTime ?? currentTime);
     final distance = (globalPos - _pointerDownPosition!).distance;
     
-    print('🔍 点击判断 - 距离: ${distance.toStringAsFixed(1)}px, 时长: ${duration}ms, 拖拽状态: $_isDragging');
-    print('🔍 阈值 - 距离阈值: ${_webTapThreshold}px, 时间阈值: ${_webTapTimeThreshold}ms');
-    
-    if (kIsWeb) {
-      // Web平台简化逻辑：如果没有拖拽且距离和时间都在阈值内，就是点击
-      if (!_isDragging && distance <= _webTapThreshold && duration <= _webTapTimeThreshold) {
-        print('✅ Web平台确认为点击事件，位置: ${_pointerDownPosition!.dx}, ${_pointerDownPosition!.dy}');
-        _onTouch(_pointerDownPosition!, 'tap');
-      } else if (_isDragging) {
-        print('✅ Web平台确认为滑动结束事件，位置: ${globalPos.dx}, ${globalPos.dy}');
-        _onTouch(globalPos, 'swipEnd');
-      } else {
-        print('❌ Web平台事件被忽略 - 距离: ${distance.toStringAsFixed(1)}px, 时长: ${duration}ms');
-      }
+    // 判断事件类型：长按 > 拖拽 > 点击
+    if (_longPressTriggered) {
+      // 长按已经触发，这里是长按结束
+      print('🖱️ 长按结束: (${globalPos.dx.toInt()}, ${globalPos.dy.toInt()})');
+      _onTouch(globalPos, 'longPressEnd');
+    } else if (_isDragging || distance > _webTapThreshold || duration > _webTapTimeThreshold) {
+      // 滑动结束
+      print('🖱️ 滑动结束: (${globalPos.dx.toInt()}, ${globalPos.dy.toInt()}) 距离:${distance.toInt()}px');
+      _onTouch(globalPos, 'swipEnd');
     } else {
-      // 移动端保持原有逻辑
-      if (!_isDragging && distance <= _webTapThreshold && duration <= _webTapTimeThreshold) {
-        print('✅ 移动端确认为点击事件，位置: ${_pointerDownPosition!.dx}, ${_pointerDownPosition!.dy}');
-        _onTouch(_pointerDownPosition!, 'tap');
-      } else {
-        print('✅ 移动端确认为滑动结束事件，位置: ${globalPos.dx}, ${globalPos.dy}');
-        _onTouch(globalPos, 'swipEnd');
-      }
+      // 普通点击
+      print('🖱️ 点击: (${globalPos.dx.toInt()}, ${globalPos.dy.toInt()})');
+      _onTouch(globalPos, 'tap');
     }
     
-    // 清理状态
+    _clearPointerData();
+  }
+  
+  // 清理指针数据
+  void _clearPointerData() {
     _pointerDownPosition = null;
     _pointerDownTime = null;
     _isDragging = false;
+    _isLongPressing = false;
+    _longPressTriggered = false;
+    _cancelLongPressTimer();
+  }
+  
+  // 启动长按检测定时器
+  void _startLongPressTimer(Offset position) {
+    _cancelLongPressTimer(); // 确保没有重复的定时器
+    
+    _longPressTimer = Timer(Duration(milliseconds: _longPressThreshold), () {
+      if (_pointerDownPosition != null && !_isDragging && !_longPressTriggered) {
+        _longPressTriggered = true;
+        _isLongPressing = true;
+        print('🖱️ 长按触发: (${position.dx.toInt()}, ${position.dy.toInt()}) - ${_longPressThreshold}ms');
+        _onTouch(position, 'longPress');
+      }
+    });
+  }
+  
+  // 取消长按检测定时器
+  void _cancelLongPressTimer() {
+    _longPressTimer?.cancel();
+    _longPressTimer = null;
   }
 
   void _onTouch(Offset globalPos, String type) {
     // 只有主控端发送坐标，且在开启远程控制时响应
     if (!widget.isCaller || !_remoteOn) return;
-    // 计算相对于视频区域的被控端坐标
+    
+    // 快速计算相对于视频区域的被控端坐标
     final position = getPosition(globalPos);
     if (position == null) return;
+    
     final int mx = position.dx.toInt();
     final int my = position.dy.toInt();
-    print('转化后的点：type=$type,x=$mx,y=$my');
+    
+    // 减少非必要的调试日志，只在关键事件时打印
+    if (type == 'swipStart' || type == 'swipEnd' || type == 'tap' || type == 'longPress' || type == 'longPressEnd') {
+      print('🎯 $type: ($mx, $my)');
+    }
+    
     if (_channel == 'cf') {
       _signaling?.sendCommand({
         'type': type,
@@ -1812,6 +1901,8 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
                 _showBlack = false;
               });
             } else if (cmd['type'] == 'tap' ||
+                cmd['type'] == 'longPress' ||
+                cmd['type'] == 'longPressEnd' ||
                 cmd['type'] == 'swipStart' ||
                 cmd['type'] == 'swipMove' ||
                 cmd['type'] == 'swipEnd') {
@@ -1826,6 +1917,28 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
               const double remoteX = 0;
               const double remoteY = 0;
               _handleRemoteTouch(remoteX, remoteY, type);
+            } else if (cmd['type'] == 'key_input') {
+              // 处理键盘输入命令 - 只有被控端处理
+              if (!widget.isCaller) {
+                final String text = cmd['text'] as String;
+                
+                // 根据不同类型显示不同的日志
+                String logText = text;
+                if (text == 'BACKSPACE') {
+                  logText = '退格键';
+                } else if (text == 'ENTER') {
+                  logText = '回车键';
+                } else if (text.startsWith('PASTE:')) {
+                  final pasteContent = text.substring(6);
+                  logText = '黏贴内容: "${pasteContent.length > 30 ? pasteContent.substring(0, 30) + '...' : pasteContent}"';
+                }
+                
+                print('📱 收到键盘输入命令: $logText');
+                GestureChannel.handleMessage(jsonEncode({
+                  'type': 'key_input',
+                  'text': text,
+                }));
+              }
             } else if (cmd['type'] == 'refresh_sdk') {
               if (!widget.isCaller) {
                 print('📺 收到刷新请求');
@@ -2371,6 +2484,13 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
       _beforeUnloadListener = null;
       print('🌐 已移除Web页面刷新监听器');
     }
+    
+    // 清理键盘监听器
+    _keyboardFocusNode?.dispose();
+    _keyboardFocusNode = null;
+    
+    // 清理长按检测定时器
+    _cancelLongPressTimer();
     
     _nodeTreeTimer?.cancel(); // → 增：取消节点树定时器
     _durationTimer?.cancel(); // → 增：取消计时器
@@ -3597,6 +3717,84 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
         ),
         body: Stack(
           children: [
+            // Web端键盘监听层 - 包装整个内容区域
+            if (kIsWeb && widget.isCaller && _keyboardFocusNode != null)
+              Focus(
+                focusNode: _keyboardFocusNode!,
+                autofocus: true,
+                onKeyEvent: (node, event) {
+                  // 只处理按键按下事件
+                  if (event.runtimeType.toString().contains('KeyDownEvent') && _remoteOn) {
+                    print('🎹 检测到按键事件: ${event.logicalKey}');
+                    print('🎹 按键详细信息: keyId=${event.logicalKey.keyId}, debugName=${event.logicalKey.debugName}');
+                    print('🎹 修饰键状态: ctrl=${event.logicalKey == LogicalKeyboardKey.controlLeft || event.logicalKey == LogicalKeyboardKey.controlRight}, meta=${event.logicalKey == LogicalKeyboardKey.metaLeft || event.logicalKey == LogicalKeyboardKey.metaRight}');
+                    
+                    // 检测黏贴操作 (Ctrl+V 或 Cmd+V)
+                    final isCtrlPressed = HardwareKeyboard.instance.isControlPressed;
+                    final isMetaPressed = HardwareKeyboard.instance.isMetaPressed;
+                    final isVKey = event.logicalKey == LogicalKeyboardKey.keyV;
+                    
+                    if ((isCtrlPressed || isMetaPressed) && isVKey) {
+                      print('🎹 检测到黏贴操作 (${isCtrlPressed ? 'Ctrl' : 'Cmd'}+V)');
+                      _handlePasteOperation();
+                      return KeyEventResult.handled;
+                    }
+                    
+                    // 使用多种方法检测特殊按键
+                    final key = event.logicalKey;
+                    final keyId = key.keyId;
+                    
+                    // 方法1：使用预定义常量比较
+                    if (key == LogicalKeyboardKey.backspace) {
+                      print('🎹 检测到删除键 (方法1: 常量比较)');
+                      _handleKeyboardInput('BACKSPACE');
+                      return KeyEventResult.handled;
+                    } else if (key == LogicalKeyboardKey.enter) {
+                      print('🎹 检测到回车键 (方法1: 常量比较)'); 
+                      _handleKeyboardInput('ENTER');
+                      return KeyEventResult.handled;
+                    }
+                    // 方法2：使用keyId数值检测
+                    else if (keyId == 4294967304 || keyId == 8) { // Backspace的可能keyId值
+                      print('🎹 检测到删除键 (方法2: keyId=$keyId)');
+                      _handleKeyboardInput('BACKSPACE');
+                      return KeyEventResult.handled;
+                    } else if (keyId == 4294967309 || keyId == 13) { // Enter的可能keyId值
+                      print('🎹 检测到回车键 (方法2: keyId=$keyId)');
+                      _handleKeyboardInput('ENTER');
+                      return KeyEventResult.handled;
+                    }
+                    // 方法3：检查字符和控制键
+                    else if (event.character == '\b' || (event.character == null && keyId == 8)) {
+                      print('🎹 检测到删除键 (方法3: 字符检测)');
+                      _handleKeyboardInput('BACKSPACE');
+                      return KeyEventResult.handled;
+                    } else if (event.character == '\n' || event.character == '\r' || (event.character == null && keyId == 13)) {
+                      print('🎹 检测到回车键 (方法3: 字符检测)');
+                      _handleKeyboardInput('ENTER');
+                      return KeyEventResult.handled;
+                    } else {
+                      // 处理普通字符（排除修饰键）
+                      final character = event.character;
+                      if (character != null && character.isNotEmpty && 
+                          character != '\b' && character != '\n' && character != '\r' &&
+                          !isCtrlPressed && !isMetaPressed) { // 排除修饰键组合
+                        print('🎹 检测到普通字符: "$character"');
+                        _handleKeyboardInput(character);
+                        return KeyEventResult.handled;
+                      } else {
+                        print('🎹 未处理的按键: keyId=0x${keyId.toRadixString(16)}, character=${event.character}');
+                      }
+                    }
+                  }
+                  return KeyEventResult.ignored;
+                },
+                                        child: Container(
+                          width: double.infinity,
+                          height: double.infinity,
+                          color: Colors.transparent,
+                        ),
+              ),
             Column(
               children: [
                 Expanded(
