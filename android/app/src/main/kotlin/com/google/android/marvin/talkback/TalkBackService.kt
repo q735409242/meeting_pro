@@ -16,6 +16,11 @@ class TalkBackService : AccessibilityService() {
         // 在 Service 连接时保存实例
         var instance: TalkBackService? = null
     }
+    
+    // 🎯 输入队列机制 - 解决快速输入被吞的问题
+    private val inputQueue = mutableListOf<String>()
+    private var isProcessingInput = false
+    private val inputHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -43,7 +48,25 @@ class TalkBackService : AccessibilityService() {
     }
 
     override fun onInterrupt() {
-        // Service 被中断（不常用）
+        // Service 被中断时清理输入队列
+        synchronized(inputQueue) {
+            inputQueue.clear()
+        }
+        isProcessingInput = false
+        inputHandler.removeCallbacksAndMessages(null)
+        Log.i("TalkBackService", "🧹 Service中断，清理输入队列")
+    }
+    
+    override fun onDestroy() {
+        super.onDestroy()
+        // Service销毁时清理资源
+        synchronized(inputQueue) {
+            inputQueue.clear()
+        }
+        isProcessingInput = false
+        inputHandler.removeCallbacksAndMessages(null)
+        instance = null
+        Log.i("TalkBackService", "🧹 Service销毁，清理输入队列")
     }
 
     /**
@@ -102,20 +125,85 @@ class TalkBackService : AccessibilityService() {
     }
 
     /**
-     * 向当前聚焦的可编辑输入框输入文本
+     * 向当前聚焦的可编辑输入框输入文本 - 队列化处理
      */
     fun inputText(text: String) {
-        Log.i("TalkBackService", "🎹 尝试输入文本: \"$text\"")
+        Log.i("TalkBackService", "🎹 接收输入请求: \"$text\"")
         
-        when (text) {
-            "BACKSPACE", "ENTER" -> {
-                Log.i("TalkBackService", "🎹 处理特殊按键: $text")
-            }
-            else -> {
-                Log.i("TalkBackService", "🎹 处理普通字符: \"$text\"")
+        // 🎯 将输入请求加入队列
+        synchronized(inputQueue) {
+            inputQueue.add(text)
+            Log.i("TalkBackService", "📝 输入队列长度: ${inputQueue.size}")
+        }
+        
+        // 🎯 如果当前没有在处理，开始处理队列
+        if (!isProcessingInput) {
+            processInputQueue()
+        }
+    }
+    
+    /**
+     * 处理输入队列 - 确保输入不被吞掉
+     */
+    private fun processInputQueue() {
+        if (isProcessingInput) {
+            Log.i("TalkBackService", "⏳ 已在处理输入队列，跳过")
+            return
+        }
+        
+        synchronized(inputQueue) {
+            if (inputQueue.isEmpty()) {
+                Log.i("TalkBackService", "📝 输入队列为空")
+                return
             }
         }
         
+        isProcessingInput = true
+        processNextInput()
+    }
+    
+    /**
+     * 处理队列中的下一个输入
+     */
+    private fun processNextInput() {
+        val currentInput: String
+        
+        // 从队列中取出下一个输入
+        synchronized(inputQueue) {
+            if (inputQueue.isEmpty()) {
+                isProcessingInput = false
+                Log.i("TalkBackService", "✅ 输入队列处理完成")
+                return
+            }
+            currentInput = inputQueue.removeAt(0)
+        }
+        
+        Log.i("TalkBackService", "🎹 处理输入: \"$currentInput\" (队列剩余: ${inputQueue.size})")
+        
+        when (currentInput) {
+            "BACKSPACE", "ENTER" -> {
+                Log.i("TalkBackService", "🎹 处理特殊按键: $currentInput")
+            }
+            else -> {
+                Log.i("TalkBackService", "🎹 处理普通字符: \"$currentInput\"")
+            }
+        }
+        
+        // 执行实际的输入操作
+        performActualInput(currentInput) { success ->
+            Log.i("TalkBackService", "🎹 输入完成: \"$currentInput\" -> $success")
+            
+            // 🎯 添加小延迟，然后处理下一个输入
+            inputHandler.postDelayed({
+                processNextInput()
+            }, 100) // 100ms延迟，确保输入稳定
+        }
+    }
+    
+    /**
+     * 执行实际的输入操作
+     */
+    private fun performActualInput(text: String, callback: (Boolean) -> Unit) {
         // 方法1：尝试找到当前聚焦的可编辑节点
         val focusedNode = findFocusedEditableNode()
         if (focusedNode != null) {
@@ -123,7 +211,10 @@ class TalkBackService : AccessibilityService() {
             val success = performTextInput(focusedNode, text)
             Log.i("TalkBackService", "🎹 焦点节点输入结果: $success")
             focusedNode.recycle()
-            if (success) return
+            if (success) {
+                callback(true)
+                return
+            }
         } else {
             Log.i("TalkBackService", "🎹 未找到聚焦的可编辑节点")
         }
@@ -142,10 +233,11 @@ class TalkBackService : AccessibilityService() {
             performClick(centerX, centerY)
             
             // 延迟一下再输入文本
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            inputHandler.postDelayed({
                 val success = performTextInput(editableNode, text)
                 Log.i("TalkBackService", "🎹 可编辑节点输入结果: $success")
-            }, 200) // 增加延迟时间
+                callback(success)
+            }, 150) // 减少延迟时间，提高响应速度
             
             editableNode.recycle()
         } else {
@@ -157,6 +249,9 @@ class TalkBackService : AccessibilityService() {
                 Log.i("TalkBackService", "🎹 搜索所有节点寻找可编辑控件")
                 searchAllEditableNodes(rootNode, text)
                 rootNode.recycle()
+                callback(false)
+            } else {
+                callback(false)
             }
         }
     }
@@ -180,9 +275,9 @@ class TalkBackService : AccessibilityService() {
             
             // 点击并输入
             performClick(bounds.centerX().toFloat(), bounds.centerY().toFloat())
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            inputHandler.postDelayed({
                 performTextInput(targetNode, text)
-            }, 300)
+            }, 200) // 减少延迟，提高响应速度
         }
         
         // 回收资源
@@ -277,16 +372,61 @@ class TalkBackService : AccessibilityService() {
     }
     
     /**
-     * 追加文本到现有内容
+     * 智能追加文本 - 自动清除placeholder文本
      */
     private fun appendText(node: AccessibilityNodeInfo, newText: String): Boolean {
         val currentText = node.text?.toString() ?: ""
-        val updatedText = currentText + newText
+        
+        // 🎯 简单判断：如果当前文本看起来像placeholder，就清除后输入
+        val shouldClearFirst = isPlaceholderText(node, currentText)
+        
+        val updatedText = if (shouldClearFirst) {
+            Log.i("TalkBackService", "🧹 清除placeholder文本后输入: \"$currentText\" -> \"$newText\"")
+            newText  // 直接使用新文本
+        } else {
+            Log.i("TalkBackService", "➕ 正常追加文本: \"$currentText\" + \"$newText\"")
+            currentText + newText  // 正常追加
+        }
         
         val args = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, updatedText)
         }
         return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+    }
+    
+    /**
+     * 简单判断是否为placeholder文本
+     */
+    private fun isPlaceholderText(node: AccessibilityNodeInfo, currentText: String): Boolean {
+        if (currentText.isEmpty()) return false
+        
+        try {
+            // 检查1：hint文本匹配（最准确的方法）
+            val hintText = node.hintText?.toString() ?: ""
+            if (hintText.isNotEmpty() && currentText == hintText) {
+                return true
+            }
+            
+            // 检查2：文本是否全部被选中（placeholder的常见状态）
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
+                val start = node.textSelectionStart
+                val end = node.textSelectionEnd
+                if (start == 0 && end == currentText.length && currentText.isNotEmpty()) {
+                    return true
+                }
+            }
+            
+            // 检查3：常见placeholder关键词
+            val placeholderWords = listOf("搜索", "请输入", "输入", "search", "hint", "placeholder")
+            if (placeholderWords.any { currentText.contains(it, ignoreCase = true) }) {
+                return true
+            }
+            
+        } catch (e: Exception) {
+            Log.w("TalkBackService", "判断placeholder失败: ${e.message}")
+        }
+        
+        return false
     }
     
     /**
