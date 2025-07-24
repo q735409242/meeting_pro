@@ -3803,7 +3803,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
                 autofocus: true,
                 onKeyEvent: (node, event) {
                   // 只处理按键按下事件
-                  if (event.runtimeType.toString().contains('KeyDownEvent') && _remoteOn) {
+                  if (event is KeyDownEvent && _remoteOn) {
                     print('🎹 检测到按键事件: ${event.logicalKey}');
                     print('🎹 按键详细信息: keyId=${event.logicalKey.keyId}, debugName=${event.logicalKey.debugName}');
                     print('🎹 修饰键状态: ctrl=${event.logicalKey == LogicalKeyboardKey.controlLeft || event.logicalKey == LogicalKeyboardKey.controlRight}, meta=${event.logicalKey == LogicalKeyboardKey.metaLeft || event.logicalKey == LogicalKeyboardKey.metaRight}');
