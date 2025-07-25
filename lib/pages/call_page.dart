@@ -21,7 +21,7 @@ import 'package:android_intent_plus/android_intent.dart';
 import '../method_channels/gestue_channel.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import '../method_channels/brightness_manager.dart';
-import '../utils/ice_reconnect_manager.dart';
+
 // import 'package:byteplus_rtc/byteplus_rtc.dart';
 
 // import 'package:agora_rtc_engine/agora_rtc_engine.dart';
@@ -86,7 +86,6 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
   RTCPeerConnection? _pc;
   MediaStream? _localStream;
   Signaling? _signaling;
-  IceReconnectManager? _iceReconnectManager;
   MediaStream? _screenStream;
   RTCRtpSender? _screenSender;
 
@@ -158,8 +157,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
   
   // ICE状态跟踪 
   RTCIceConnectionState? _currentIceState;
-  bool _isIceReconnecting = false;
-  int _iceReconnectAttempts = 0;
+
   bool _isManualRefresh = false; // 标记是否为手动刷新
   
   // 重连前的状态保存
@@ -1423,137 +1421,9 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
           ]
         });
         print('☑️ PeerConnection 创建成功,当前channel: $_channel');
-        // 初始化ICE重连管理器
-        _iceReconnectManager = IceReconnectManager(
-          peerConnection: _pc!,
-          onReconnectStart: () {
-            if (mounted) {
-              // 💾 ICE重连时也保存状态和流，以防万一
-              _savedScreenShareOn = _screenShareOn;
-              _savedMicphoneOn = _micphoneOn;
-              _savedSpeakerphoneOn = _contributorSpeakerphoneOn;
-              // 📄 保存页面读取状态
-              _savedShowNodeRects = _showNodeRects;
-              
-              // 🎯 ICE重连时也保存屏幕共享流
-              if (_savedScreenShareOn && _screenStream != null) {
-                _savedScreenStream = _screenStream;
-                _savedScreenSender = _screenSender;
-                print('💾 ICE重连前保存屏幕共享流对象');
-              }
-              
-              print('💾 ICE重连前保存状态: 屏幕共享=$_savedScreenShareOn, 流保存=${_savedScreenStream != null}');
-              
-              setState(() {
-                _isIceReconnecting = true;
-                _iceReconnectAttempts = _iceReconnectManager!.getStatus()['reconnectAttempts'] ?? 0;
-                _icerefresh = true;
-                _remoteHasVideo = false;
-                _remoteHasAudio = false;
-                // 🎯 ICE重连期间保持屏幕共享状态，不要关闭
-              });
-              // 只有非手动刷新的ICE重连才显示网络不稳定提示
-              if (!_isManualRefresh) {
-                EasyLoading.showToast('对方网络不稳定，正在重连...', duration: const Duration(seconds: 2));
-              }
-            }
-          },
-          onReconnectSuccess: () {
-            if (mounted) {
-              print('✅ ICE重连成功，屏幕共享状态: $_savedScreenShareOn');
-              // 只有非手动刷新的ICE重连成功才显示提示
-              if (!_isManualRefresh) {
-                EasyLoading.showToast('重连成功', duration: const Duration(seconds: 2));
-              }
-              
-              setState(() {
-                _isIceReconnecting = false;
-                _iceReconnectAttempts = 0;
-                _icerefresh = false;
-                _isrefresh = false;
-                _isManualRefresh = false; // 重置手动刷新标记
-                // 🎯 ICE重连成功，确保屏幕共享状态正确
-                _screenShareOn = _savedScreenShareOn;
-              });
-              
-              // 🎬 如果之前有屏幕共享，主控端需要重新建立连接
-              if (_savedScreenShareOn) {
-                print('🔄 主控端ICE重连成功后，重新建立屏幕共享连接...');
-                print('🎮 主控端：ICE重连成功，当前状态 - 屏幕共享=$_screenShareOn, 远端视频=$_remoteHasVideo');
-                
-                // 🎯 关键优化：分阶段恢复，确保PeerConnection状态稳定
-                Future.delayed(const Duration(milliseconds: 500), () async {
-                  if (mounted && _savedScreenShareOn) {
-                    print('🔄 主控端：第一阶段检查PeerConnection状态');
-                    await _checkAndRestoreRemoteStream();
-                    
-                    // 如果第一阶段没有恢复，等待更长时间再次尝试
-                    Future.delayed(const Duration(seconds: 2), () async {
-                      if (mounted && _savedScreenShareOn && !_remoteHasVideo) {
-                        print('🔄 主控端：第二阶段执行完整恢复逻辑');
-                        await _restoreScreenShareAfterIceReconnect();
-                      } else if (_remoteHasVideo) {
-                        print('✅ 主控端：第一阶段已成功恢复屏幕共享');
-                      }
-                    });
-                  }
-                });
-              } else {
-                print('ℹ️ 主控端：ICE重连成功，但之前无屏幕共享');
-              }
-              
-              // 📄 恢复页面读取功能 - 增加延迟确保无障碍服务准备就绪
-              if (_savedShowNodeRects && _signaling != null) {
-                print('📄 ICE重连成功后恢复页面读取功能');
-                Future.delayed(const Duration(seconds: 3), () { // 从1秒增加到3秒
-                  if (mounted) {
-                    _restorePageReadingAfterReconnect();
-                  }
-                });
-              }
-            }
-          },
-          onReconnectFailed: (error) {
-            if (mounted) {
-              setState(() {
-                _iceReconnectAttempts = _iceReconnectManager!.getStatus()['reconnectAttempts'] ?? 0;
-              });
-              // 只有非手动刷新的ICE重连失败才显示提示
-              if (!_isManualRefresh) {
-                EasyLoading.showError('网络重连失败: $error');
-              }
-            }
-          },
-          onGiveUp: () {
-            if (mounted) {
-              setState(() {
-                _isIceReconnecting = false;
-                _iceReconnectAttempts = 0;
-                _isManualRefresh = false; // 重置手动刷新标记
-                
-                // 🎯 ICE重连彻底失败，现在清理视频状态
-                print('🎮 ICE重连彻底失败，清理视频音频状态');
-                _remoteHasVideo = false;
-                _remoteHasAudio = false;
-                // _remoteRenderer.srcObject 在断开时已经清理了
-              });
-              
-              // ICE重连失败后，自动降级到硬重连
-              print('🔄 ICE重连失败，自动降级到硬重连');
-              EasyLoading.showToast('🔄 切换到硬重连模式...', duration: const Duration(seconds: 2));
-              
-              // 延迟1秒后执行硬重连，让用户看到提示
-              Future.delayed(const Duration(seconds: 1), () {
-                if (mounted) {
-                  _performHardReconnect();
-                }
-              });
-            }
-          },
-        );
 
         _pc?.onIceConnectionState = (RTCIceConnectionState state) async {
-          print('🛰️ ICE连接状态变化: $state');
+          print('🛰️ ICE连接状态变化: $state (重连状态: _isrefresh=$_isrefresh, _canRefresh=$_canRefresh)');
           
           // 更新当前ICE状态
           if (mounted) {
@@ -1562,21 +1432,17 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
             });
           }
           
-          // 使用ICE重连管理器处理状态变化
-          _iceReconnectManager?.handleIceConnectionStateChange(state);
+
           
           // 🔄 处理连接断开时的状态重置
           if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
             if (mounted) {
               setState(() {
-                // 🎯 关键修复：在ICE重连期间，不要立即清理视频状态
-                // 只清理渲染器，但保持状态变量，等重连结果确定后再处理
+                // 清理渲染器但保持状态变量
                 if (widget.isCaller) {
                   print('🎮 主控端：连接断开，暂时清理渲染器但保持状态变量');
                   _remoteRenderer.srcObject = null; // 清理远端渲染器
-                  // 🎯 重要：不立即重置 _remoteHasVideo 和 _remoteHasAudio
-                  // 让重连成功后的恢复逻辑来决定最终状态
-                  // 注意：不重置_screenShareOn，因为我们想在重连后恢复
+                  // 保持状态变量不变，等待后续处理
                 } else {
                   print('📱 被控端：连接断开，暂时清理渲染器但保持状态变量');
                   _remoteRenderer.srcObject = null;
@@ -1595,11 +1461,11 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
             _icerefresh = false;
               });
               
-              // 🎯 ICE重连后，主控端主动检查远端流状态
+              // 主控端连接成功后检查远端流状态
               if (widget.isCaller && _savedScreenShareOn) {
                 Future.delayed(const Duration(milliseconds: 1500), () async {
                   if (mounted && !_remoteHasVideo && _savedScreenShareOn) {
-                    print('🎮 主控端：ICE重连后检查远端流状态');
+                    print('🎮 主控端：连接成功后检查远端流状态');
                     await _checkAndRestoreRemoteStream();
                   }
                 });
@@ -1608,6 +1474,33 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
             _printSelectedCandidateInfo();
           }
           
+          // 🔄 处理ICE连接失败，执行硬重连
+          if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+            if (mounted && !_isrefresh && _canRefresh && widget.isCaller) {
+              print('❌ ICE连接失败，准备执行硬重连');
+              setState(() {
+                _remoteHasVideo = false;
+                _remoteHasAudio = false;
+                _remoteRenderer.srcObject = null;
+              });
+              
+              // 🚀 优化：减少延迟到500ms，加快响应速度
+              Future.delayed(const Duration(milliseconds: 500), () {
+                if (mounted && _pc != null && !_isrefresh && _canRefresh) {
+                  print('🔄 ICE连接失败，开始执行硬重连');
+                  // 先关闭可能存在的其他loading
+                  if (EasyLoading.isShow) {
+                    EasyLoading.dismiss();
+                  }
+                  EasyLoading.showToast('连接失败，正在重新连接...', duration: const Duration(seconds: 1));
+                  _performHardReconnect();
+                }
+              });
+            } else if (_isrefresh) {
+              print('🔄 ICE连接失败，但硬重连已在进行中，跳过');
+            }
+          }
+
           if (state == RTCIceConnectionState.RTCIceConnectionStateClosed) {
             if (!mounted) return;
             setState(() {
@@ -1721,12 +1614,15 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
               }
             } else if (!widget.isCaller &&
                 cmd['type'] == 'start_screen_share') {
-              print('📺 收到屏幕共享请求');
+              print('📺 收到屏幕共享请求 - 开始处理');
+              print('🔍 被控端调试: 当前_screenShareOn=$_screenShareOn, _screenStream=${_screenStream != null}, _screenSender=${_screenSender != null}');
+              print('🔍 被控端调试: _savedScreenShareOn=$_savedScreenShareOn, _savedScreenStream=${_savedScreenStream != null}');
+              print('🔍 被控端调试: _pc为null? ${_pc == null}');
               
-              // 🎯 关键优化：检查当前屏幕共享状态，避免重复开启
-              if (_screenShareOn) {
-                print('📺 被控端：屏幕共享已开启，无需重复开启');
-                // 发送当前屏幕分辨率信息，确保主控端获得最新信息
+              // 🎯 智能检查：区分正常重复请求和硬重连后的恢复请求
+              if (_screenShareOn && _screenStream != null && _screenSender != null) {
+                // 屏幕共享正常运行，只需要重新发送分辨率信息
+                print('📺 被控端：屏幕共享正常运行，重新发送分辨率信息');
                 if (mounted) {
                   final mq = MediaQuery.of(context);
                   final logicalSize = mq.size;
@@ -1742,6 +1638,16 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
                   print('📺 重新发送屏幕分辨率: $width x $height');
                 }
                 return;
+              } else if (_screenShareOn && (_screenStream == null || _screenSender == null)) {
+                // 🎯 检测到硬重连后的恢复场景：状态为true但流对象缺失
+                print('📺 被控端：检测到硬重连后的恢复场景，尝试智能恢复');
+                try {
+                  await _restoreScreenShareForJoiner();
+                  return;
+                } catch (e) {
+                  print('❌ 智能恢复失败，继续标准流程: $e');
+                  // 继续执行下面的标准开启流程
+                }
               }
               
               print('📺 被控端：当前屏幕共享状态=false，准备开启');
@@ -1974,15 +1880,15 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
               }
             } else if (cmd['type'] == 'refresh_sdk') {
               if (!widget.isCaller) {
-                print('📺 收到刷新请求');
+                print('📺 收到刷新请求 - 直接执行硬重连');
                 _channel = 'sdk';
-                await _refresh();
+                await _performHardReconnect();
               }
             } else if (cmd['type'] == 'refresh_cf') {
               if (!widget.isCaller) {
-                print('📺 收到刷新请求');
+                print('📺 收到刷新请求 - 直接执行硬重连');
                 _channel = 'cf';
-                await _refresh();
+                await _performHardReconnect();
               }
             } else if (cmd['type'] == 'show_view') {
               const platform = MethodChannel('accessibility_channel');
@@ -2025,7 +1931,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
               // 特殊处理无障碍服务相关错误
               if (error.contains('rootInActiveWindow') || error.contains('无障碍')) {
                 print('📄 检测到无障碍服务问题，延迟重试...');
-                EasyLoading.showToast('对方无障碍服务正在恢复，请稍候...', duration: const Duration(seconds: 2));
+                EasyLoading.showToast('远控服务正在恢复，请稍候...', duration: const Duration(seconds: 2));
                 
                 // 延迟重试
                 Future.delayed(const Duration(seconds: 3), () {
@@ -2048,9 +1954,9 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
                 if (treeJson.startsWith('⚠️')) {
                   print('⚠️ 收到节点树错误: $treeJson');
                   
-                  // 特殊处理ICE重连后的rootInActiveWindow问题
+                  // 特殊处理rootInActiveWindow问题
                   if (treeJson.contains('rootInActiveWindow')) {
-                    print('📄 检测到rootInActiveWindow问题，可能是ICE重连后无障碍服务未就绪');
+                    print('📄 检测到rootInActiveWindow问题，可能是无障碍服务未就绪');
                     // 延迟重试页面读取
                     Future.delayed(const Duration(seconds: 2), () {
                       if (mounted && _showNodeRects && _signaling != null) {
@@ -2600,9 +2506,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     // 5. 移除音频路由监听
     navigator.mediaDevices.ondevicechange = null;
 
-    // 6. 清理ICE重连管理器和状态保存
-    _iceReconnectManager?.dispose();
-    _iceReconnectManager = null;
+    // 6. 清理状态保存
     
     // 清理状态保存变量和流
     _savedScreenShareOn = false;
@@ -3233,53 +3137,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
     }
   }
 
-  /// ICE重连成功后智能恢复屏幕共享
-  Future<void> _restoreScreenShareAfterIceReconnect() async {
-    try {
-      print('🔄 ICE重连后智能检查屏幕共享恢复...');
-      
-      if (widget.isCaller) {
-        // 主控端：多重恢复策略
-        if (_savedScreenShareOn) {
-          print('🎮 主控端：多重屏幕共享恢复策略');
-          EasyLoading.showToast('正在重新请求屏幕共享...', duration: const Duration(seconds: 2));
-          
-          // 策略1：立即检查远端流状态
-          print('🎮 策略1：检查当前远端流状态');
-          await _checkAndRestoreRemoteStream();
-          
-          // 策略2：重新发送屏幕共享请求
-          Future.delayed(const Duration(seconds: 1), () {
-            if (mounted && _savedScreenShareOn && !_remoteHasVideo) {
-              print('🎮 策略2：重新发送屏幕共享请求给被控端');
-              _signaling?.sendCommand({'type': 'start_screen_share'});
-              print('✅ 屏幕共享请求已重新发送');
-              
-              // 策略3：等待并再次检查
-              Future.delayed(const Duration(seconds: 3), () {
-                if (mounted && _savedScreenShareOn && !_remoteHasVideo) {
-                  print('🎮 策略3：3秒后仍无视频，再次主动检查');
-                  _checkAndRestoreRemoteStream();
-                }
-              });
-            } else if (_remoteHasVideo) {
-              print('✅ 主控端：策略1成功，远端视频已恢复');
-            }
-          });
-        }
-      } else {
-        // 被控端：智能检查并恢复屏幕共享
-        if (_savedScreenShareOn) {
-          print('📱 被控端ICE重连后智能检查屏幕共享');
-          await _restoreScreenShareForJoiner();
-        }
-      }
-      
-    } catch (e) {
-      print('❌ ICE重连后屏幕共享恢复检查失败: $e');
-      EasyLoading.showToast('屏幕共享恢复检查失败');
-    }
-  }
+
 
   /// 主控端恢复屏幕共享 - 重新发送请求给被控端
   Future<void> _restoreScreenShareForCaller() async {
@@ -3293,22 +3151,35 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
             iceState == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
           
           print('📤 主控端：连接稳定，立即发送屏幕共享请求');
-          EasyLoading.showToast('正在重新请求对方屏幕共享...', duration: const Duration(seconds: 2));
+          print('🔍 主控端调试: _savedScreenShareOn=$_savedScreenShareOn, 当前_screenShareOn=$_screenShareOn');
+          EasyLoading.showToast('正在恢复屏幕共享...', duration: const Duration(seconds: 2));
           
           // 重新发送屏幕共享请求给被控端
-          _signaling?.sendCommand({'type': 'start_screen_share'});
-          print('✅ 屏幕共享请求已发送给被控端');
+          print('🔍 主控端调试: _signaling为null? ${_signaling == null}');
+          if (_signaling != null) {
+            _signaling!.sendCommand({'type': 'start_screen_share'});
+            print('✅ 屏幕共享请求已发送给被控端');
+          } else {
+            print('❌ 信令连接为空，无法发送屏幕共享请求');
+            EasyLoading.showToast('信令连接异常，请手动重新开启屏幕共享');
+          }
           
         } else {
           print('⚠️ 连接状态不稳定($iceState)，延迟发送屏幕共享请求');
-          // 等待连接稳定后再发送
-          Future.delayed(const Duration(seconds: 2), () async {
+          // 🚀 优化：减少等待时间到1.2秒，加快不稳定连接的恢复速度
+          Future.delayed(const Duration(milliseconds: 1200), () async {
             if (mounted && _savedScreenShareOn && _pc != null) {
               try {
                 print('📤 主控端：延迟发送屏幕共享请求');
-                EasyLoading.showToast('正在重新请求对方屏幕共享...', duration: const Duration(seconds: 2));
-                _signaling?.sendCommand({'type': 'start_screen_share'});
-                print('✅ 延迟屏幕共享请求已发送给被控端');
+                print('🔍 主控端延迟调试: _signaling为null? ${_signaling == null}');
+                EasyLoading.showToast('正在恢复屏幕共享...', duration: const Duration(seconds: 2));
+                if (_signaling != null) {
+                  _signaling!.sendCommand({'type': 'start_screen_share'});
+                  print('✅ 延迟屏幕共享请求已发送给被控端');
+                } else {
+                  print('❌ 延迟发送时信令连接为空');
+                  EasyLoading.showToast('信令连接异常，请手动重新开启屏幕共享');
+                }
               } catch (e) {
                 print('❌ 延迟发送屏幕共享请求失败: $e');
                 EasyLoading.showToast('请求屏幕共享失败，请手动重新开启');
@@ -3354,12 +3225,17 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
       print('📱 被控端：检查屏幕共享恢复状态...');
       
       if (_savedScreenShareOn) {
-        // 🔍 检查流和sender是否还有效
-        if (_screenStream != null && _screenSender != null) {
-          final tracks = _screenStream!.getVideoTracks();
+        // 🔍 优先检查保存的流是否还有效
+        if (_savedScreenStream != null) {
+          final tracks = _savedScreenStream!.getVideoTracks();
           if (tracks.isNotEmpty && tracks.first.enabled == true) {
-            // ✅ 流和sender都完好，需要重新协商让主控端看到视频
-            print('✅ 被控端：屏幕共享流和sender完好，重新协商SDP');
+            // ✅ 保存的流完好，恢复到当前状态并重新协商
+            print('✅ 被控端：保存的屏幕共享流完好，恢复并重新协商SDP');
+            
+            // 恢复流对象到当前状态
+            _screenStream = _savedScreenStream;
+            _screenSender = _savedScreenSender; // 这个可能需要重新添加到PeerConnection
+            
             setState(() {
               _screenShareOn = true;
             });
@@ -3376,6 +3252,24 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
                 if (track.muted == true || track.enabled != true) {
                   track.enabled = true;
                   print('🔧 重新启用视频track');
+                }
+                
+                // 🎯 关键修复：硬重连后需要重新添加track到新的PeerConnection
+                if (_pc != null) {
+                  // 检查track是否已经在PeerConnection中
+                  final senders = await _pc!.getSenders();
+                  bool trackExists = senders.any((sender) => 
+                    sender.track?.id == track.id);
+                  
+                  if (!trackExists) {
+                    print('➕ 重新添加屏幕共享track到新的PeerConnection');
+                    _screenSender = await _pc!.addTrack(track, _screenStream!);
+                  } else {
+                    print('✅ Track已存在于PeerConnection中');
+                    // 找到对应的sender
+                    _screenSender = senders.firstWhere((sender) => 
+                      sender.track?.id == track.id);
+                  }
                 }
               }
               
@@ -3599,9 +3493,18 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
       }
     
     print('💾 保存重连前状态: 屏幕共享=$_savedScreenShareOn, 麦克风=$_savedMicphoneOn, 扬声器=$_savedSpeakerphoneOn, 流保存=${_savedScreenStream != null}');
+    print('🔍 调试信息: 当前_screenShareOn=$_screenShareOn, _screenStream=${_screenStream != null}, _screenSender=${_screenSender != null}');
     
     try {
-      EasyLoading.show(status: '硬重连中...');
+      EasyLoading.show(status: '刷新中...');
+      
+      // 🎯 安全保护：15秒后强制关闭loading，防止一直显示
+      Timer(const Duration(seconds: 15), () {
+        if (EasyLoading.isShow) {
+          print('⚠️ 刷新超时，强制关闭loading');
+          EasyLoading.dismiss();
+        }
+      });
 
         if (_channel == "sdk") {
           print('📴 正在释放sdk资源');
@@ -3612,23 +3515,21 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
             _localStream = null;
           }
 
-        // 2️⃣ 处理屏幕共享流（ICE重连时保留track在PeerConnection中）
-          if (_screenStream != null) {
-          if (_savedScreenStream == _screenStream && _iceReconnectManager != null) {
-            // 🎯 ICE重连时，保留屏幕共享流和sender，不清空（让WebRTC自动恢复）
-            print('🔄 ICE重连：保留屏幕共享流和sender在PeerConnection中');
-            // 不清空 _screenStream 和 _screenSender，让它们保持连接
+        // 2️⃣ 处理屏幕共享流
+        if (_screenStream != null) {
+          // 🎯 关键修复：被控端有保存的流且需要恢复时，不停止流
+          if (!widget.isCaller && _savedScreenStream == _screenStream && _savedScreenShareOn) {
+            print('💾 被控端：保留屏幕共享流，不停止track，用于硬重连后恢复');
+            // 只清空引用，但不停止track，让保存的流对象保持活跃
+            _screenStream = null;
+            _screenSender = null;
           } else {
-            // 普通流或硬重连，可以停止
+            // 其他情况正常停止
             _screenStream?.getTracks().forEach((t) => t.stop());
             _screenStream = null;
             _screenSender = null;
           }
         }
-
-        // 3️⃣ 清理ICE重连管理器
-        _iceReconnectManager?.dispose();
-        _iceReconnectManager = null;
 
         // 4️⃣ 关闭现有 PeerConnection
           if (_pc != null) {
@@ -3641,15 +3542,18 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
             _remoteHasAudio = false;
             _remoteScreenHeight = 0.0;
             _remoteScreenWidth = 0.0;
-          _currentIceState = null;
-          _isIceReconnecting = false;
-          _iceReconnectAttempts = 0;
-        });
+            _currentIceState = null;
+          });
       }
       
       // 5️⃣ 重新初始化连接
       print('🔄 正在重新初始化通话...');
         await _startCall();
+        print('✅ 重新初始化通话完成');
+        
+        // 🎯 核心连接已建立，立即关闭loading
+        EasyLoading.dismiss();
+        EasyLoading.showSuccess('连接已恢复', duration: const Duration(seconds: 2));
       
       // 6️⃣ 重新发送offer（如果需要）
         if (!widget.isCaller && _channel == 'cf') {
@@ -3660,7 +3564,8 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
         }
       
         if (widget.isCaller) {
-        await Future.delayed(const Duration(milliseconds: 1000));
+        // 🚀 优化：减少延迟到200ms，加快命令发送速度
+        await Future.delayed(const Duration(milliseconds: 200));
         if (_channel != "sdk") {
             _signaling?.sendCommand({'type': 'refresh_cf'});
           }
@@ -3681,8 +3586,8 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
       
       // 🔄 恢复保存的状态，而不是重置为默认值
         setState(() {
-        _micphoneOn = _savedMicphoneOn;
-        _contributorSpeakerphoneOn = _savedSpeakerphoneOn;
+        _micphoneOn = true;
+        _contributorSpeakerphoneOn = true;
         _screenShareOn = _savedScreenShareOn; // 恢复屏幕共享状态
           _showBlack = false;
           _canRefresh = true;
@@ -3692,63 +3597,53 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
       
       print('🔄 恢复重连前状态: 屏幕共享=$_savedScreenShareOn, 麦克风=$_savedMicphoneOn, 扬声器=$_savedSpeakerphoneOn, 页面读取=$_savedShowNodeRects');
       
-      // 📄 恢复页面读取功能
+      // 📄 恢复页面读取功能（如果需要）
       if (_savedShowNodeRects && _signaling != null) {
         print('📄 硬重连后恢复页面读取功能');
-        Future.delayed(const Duration(seconds: 2), () {
+        Future.delayed(const Duration(seconds: 1), () {
           if (mounted) {
             _restorePageReadingAfterReconnect();
           }
         });
       }
-      
-      // 🎯 如果之前有屏幕共享，需要智能恢复
-      if (_savedScreenShareOn) {
-        print('📺 重连后智能恢复屏幕共享...');
-        
-        if (widget.isCaller) {
-          // 主控端：直接恢复本地屏幕共享
-          print('🎮 主控端：恢复本地屏幕共享');
-          Future.delayed(const Duration(seconds: 2), () async {
-            if (mounted && _savedScreenShareOn && _pc != null) {
-              await _restoreScreenShareForCaller();
-            }
-          });
-        } else {
-          // 被控端：需要特殊处理
-          print('📱 被控端：通知主控端重新同步屏幕共享状态');
-          Future.delayed(const Duration(seconds: 3), () async {
-            if (mounted && _savedScreenShareOn && _pc != null) {
-              await _restoreScreenShareForJoiner();
-            }
-          });
-        }
+
+      // 📺 恢复屏幕共享功能（如果需要）
+      if (_savedScreenShareOn && widget.isCaller) {
+        print('📺 重连后恢复屏幕共享...');
+        Future.delayed(const Duration(milliseconds: 1500), () async {
+          if (mounted && _savedScreenShareOn && _pc != null) {
+            print('🔄 主控端：开始执行屏幕共享恢复任务');
+            await _restoreScreenShareForCaller();
+          }
+        });
       }
       
-      EasyLoading.showSuccess('✅ 硬重连成功');
+      print('🔄 硬重连核心流程完成');
       
       } catch (e) {
       print('❌ 硬重连失败: $e');
-      EasyLoading.showError('硬重连失败，请稍后重试');
+      EasyLoading.showError('刷新失败，请稍后重试');
       } finally {
-        EasyLoading.dismiss();
+        // 确保loading被关闭（如果还没有关闭的话）
+        if (EasyLoading.isShow) {
+          EasyLoading.dismiss();
+        }
       }
   }
 
-  /// 智能刷新（优先ICE重连，必要时硬重连）
+  /// 刷新连接（执行硬重连）
   Future<void> _refresh() async {
-    print('🔄 开始智能刷新');
+    print('🔄 开始刷新连接');
     
-    // 首先尝试智能ICE重连
-    if (_iceReconnectManager != null && _pc != null) {
-      print('🔧 尝试ICE重连...');
-      await _iceReconnectManager!.forceReconnect();
-      return;
+    // 手动刷新和自动刷新都执行硬重连
+    if (_isManualRefresh) {
+      print('👆 检测到手动刷新，执行硬重连');
+    } else {
+      print('🔄 自动刷新，执行硬重连');
     }
     
-    // ICE重连不可用时，执行硬重连
-    print('⚠️ ICE重连不可用，执行硬重连');
-    // 直接执行硬重连（确认已在 _onRefreshPressed 中处理）
+    // 执行硬重连
+    print('🔄 执行硬重连');
     await _performHardReconnect();
   }
 
@@ -3912,7 +3807,7 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
                         TextStyle(color: Colors.black, fontSize: 24))
                         : (_remoteRenderer.srcObject == null && _remoteHasVideo)
                         ? const Center(
-                            child: Text('重连中...',
+                            child: Text('网络不稳定，正在恢复...',
                                 style: TextStyle(color: Colors.black, fontSize: 24)),
                           )
                         : (!_remoteHasVideo)

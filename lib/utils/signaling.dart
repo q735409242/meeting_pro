@@ -265,8 +265,8 @@ class Signaling {
   
   /// 计算重连延迟
   int _calculateReconnectDelay() {
-    // 更激进的重连策略：0.5, 1, 2, 3, 5, 8秒(上限)
-    final delays = [0.5, 1, 2, 3, 5, 8];
+    // 更激进的重连策略：0.5, 1, 2, 3, 5(上限)
+    final delays = [0.5, 1, 2, 3, 5];
     final index = (_reconnectAttempts - 1).clamp(0, delays.length - 1);
     return (delays[index] * 1000).toInt(); // 转换为毫秒
   }
@@ -294,7 +294,7 @@ class Signaling {
       return true;
     }
     
-    return false;
+        return false;
   }
 
   /// 发送 SDP 到对端

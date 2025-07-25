@@ -89,7 +89,7 @@ class WebSecurity {
           window._pageLoadStatus.flutterReady = true;
           console.log('📱 Flutter初始化完成');
         });
-        
+          
         // 检测资源加载完成
         var checkAssetsLoaded = function() {
           var images = document.querySelectorAll('img');
@@ -120,7 +120,7 @@ class WebSecurity {
             clearInterval(assetCheckInterval);
           }
         }, 500);
-        
+          
         // 综合判断页面是否完全准备好
         window._checkPageFullyReady = function() {
           var status = window._pageLoadStatus;
@@ -145,7 +145,7 @@ class WebSecurity {
               console.log('✅ 页面完全准备就绪');
               window._appFullyReady = true;
             }
-            return true;
+          return true;
           }
           
           return false;
@@ -240,7 +240,7 @@ class WebSecurity {
       // 使用eval执行JavaScript代码
       jsEval('''
         // 禁用右键菜单
-        document.addEventListener('contextmenu', function(e) {
+      document.addEventListener('contextmenu', function(e) {
           e.preventDefault();
           return false;
         }, true);
@@ -308,7 +308,7 @@ class WebSecurity {
         document.addEventListener('keyup', function(e) {
           // 额外的反调试检测
           if (e.key === 'F12') {
-            e.preventDefault();
+          e.preventDefault();
             e.stopPropagation();
             // 静默禁止，不触发无限debug
           }
@@ -332,8 +332,8 @@ class WebSecurity {
     
     // 安装激进的检测机制（不包含窗口尺寸检测）
     _installDevtoolsDetectors();
-  }
-  
+        }
+        
   /// 安装激进的开发者工具检测器（不包含窗口尺寸检测）
   static void _installDevtoolsDetectors() {
     if (!kIsWeb) return;
