@@ -1447,6 +1447,23 @@ class _CallPageState extends State<CallPage> with WidgetsBindingObserver {
           'sdpSemantics': 'unified-plan',
           'optional': [
             {'googCpuOveruseDetection': false},
+            
+            // 🎯 I帧和编码器优化
+            {'googScreencastMinBitrate': 500.0},
+            {'googMaxBitrate': 2500.0},
+            {'googStartBitrate': 1500.0},
+            
+            // 🚀 I帧相关优化
+            {'googNoiseReduction': false},
+            {'googKeyframeInterval': 500.0},      // 1000ms = 1秒I帧间隔
+            {'googMinKeyframeInterval': 500.0},    // 最小500ms
+            {'googMaxKeyframeInterval': 2000.0},   // 最大2秒
+            
+            // 🎨 快速恢复
+            {'googEnableFEC': true},             // 前向错误纠正
+            {'googEnableNACK': true},            // 重传请求
+            {'googEnablePLI': true},             // 图像丢失指示
+            {'googEnableFIR': true},             // 完整帧内刷新请求
           ]
         });
         print('☑️ PeerConnection 创建成功,当前channel: $_channel');
