@@ -19,7 +19,7 @@ import org.json.JSONObject
 import com.google.android.marvin.talkback.TalkBackService
 
 class MainActivity : FlutterActivity() {
-    private val gestureChannel = "com.meeting.pro.gestueChannel"
+    private val gestureChannel = "flutter.dev/gesture_channel"
     private val wakelockChannel = "wakelock_service"
     private val brightnessChannel = "brightness_channel" // ✅ 新增亮度控制通道
 

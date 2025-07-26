@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 class GestureChannel {
-  static const String _kGestueChannel = 'com.meeting.pro.gestueChannel';
+  static const String _kGestueChannel = 'flutter.dev/gesture_channel';
 
   static const MethodChannel gestueChannel = MethodChannel(_kGestueChannel);
 
